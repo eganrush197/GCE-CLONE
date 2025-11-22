@@ -3,7 +3,11 @@
 
 import numpy as np
 from typing import List
-from .gaussian_splat import GaussianSplat
+
+try:
+    from .gaussian_splat import GaussianSplat
+except ImportError:
+    from gaussian_splat import GaussianSplat
 
 
 class LODGenerator:

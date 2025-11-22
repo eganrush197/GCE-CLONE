@@ -6,8 +6,13 @@ import trimesh
 from pathlib import Path
 from typing import Union, Optional, List
 from dataclasses import dataclass
-from .gaussian_splat import GaussianSplat
-from .lod_generator import LODGenerator
+
+try:
+    from .gaussian_splat import GaussianSplat
+    from .lod_generator import LODGenerator
+except ImportError:
+    from gaussian_splat import GaussianSplat
+    from lod_generator import LODGenerator
 
 
 @dataclass

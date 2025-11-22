@@ -5,7 +5,11 @@ import numpy as np
 import struct
 from pathlib import Path
 from typing import Union
-from .gaussian_splat import GaussianSplat
+
+try:
+    from .gaussian_splat import GaussianSplat
+except ImportError:
+    from gaussian_splat import GaussianSplat
 
 
 def save_ply(gaussians: GaussianSplat, filepath: Union[str, Path]) -> None:

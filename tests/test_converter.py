@@ -5,13 +5,15 @@ import pytest
 import numpy as np
 import sys
 from pathlib import Path
+import tempfile
+import os
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+# Add parent directory to path so we can import src
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
-from gaussian_splat import GaussianSplat
-from lod_generator import LODGenerator
+from src.mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
+from src.gaussian_splat import GaussianSplat
+from src.lod_generator import LODGenerator
 import trimesh
 
 
@@ -78,19 +80,23 @@ class TestMeshToGaussianConverter:
         """Test vertex-based initialization."""
         config = ConversionConfig(initialization_strategy='vertex')
         converter = MeshToGaussianConverter(config)
-        
+
         # Save cube to temp file
-        temp_path = Path('/tmp/test_cube.obj')
-        simple_cube.export(temp_path)
-        
-        gaussians = converter.convert(temp_path)
-        
-        # Should have one gaussian per vertex
-        assert gaussians.count == len(simple_cube.vertices)
-        assert gaussians.positions.shape == (len(simple_cube.vertices), 3)
-        
-        # Clean up
-        temp_path.unlink()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            simple_cube.export(temp_path)
+
+            gaussians = converter.convert(temp_path)
+
+            # Should have one gaussian per vertex
+            assert gaussians.count == len(simple_cube.vertices)
+            assert gaussians.positions.shape == (len(simple_cube.vertices), 3)
+        finally:
+            # Clean up
+            if temp_path.exists():
+                temp_path.unlink()
     
     def test_face_strategy(self, simple_sphere, converter):
         """Test face-based initialization."""
@@ -99,19 +105,23 @@ class TestMeshToGaussianConverter:
             samples_per_face=5
         )
         converter = MeshToGaussianConverter(config)
-        
+
         # Save sphere to temp file
-        temp_path = Path('/tmp/test_sphere.obj')
-        simple_sphere.export(temp_path)
-        
-        gaussians = converter.convert(temp_path)
-        
-        # Should have multiple gaussians
-        assert gaussians.count > 0
-        assert gaussians.positions.shape[1] == 3
-        
-        # Clean up
-        temp_path.unlink()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            simple_sphere.export(temp_path)
+
+            gaussians = converter.convert(temp_path)
+
+            # Should have multiple gaussians
+            assert gaussians.count > 0
+            assert gaussians.positions.shape[1] == 3
+        finally:
+            # Clean up
+            if temp_path.exists():
+                temp_path.unlink()
     
     def test_color_extraction(self, simple_cube):
         """Test color extraction from mesh."""
