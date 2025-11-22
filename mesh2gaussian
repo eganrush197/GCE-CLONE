@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+# ABOUTME: Command-line interface for mesh-to-gaussian conversion
+# ABOUTME: Provides simple CLI for converting OBJ/GLB files to gaussian splat PLY
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent / 'src'))
+
+from mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
+from ply_io import save_ply
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Convert 3D mesh to Gaussian Splat representation',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  mesh2gaussian input.obj output.ply
+  mesh2gaussian input.glb output.ply --strategy hybrid
+  mesh2gaussian input.obj output.ply --lod 5000,25000,100000
+  mesh2gaussian input.obj output.ply --optimize --device cuda
+        """
+    )
+    
+    parser.add_argument('input', type=str, help='Input mesh file (OBJ or GLB)')
+    parser.add_argument('output', type=str, help='Output PLY file')
+    
+    parser.add_argument('--strategy', type=str, default='adaptive',
+                        choices=['vertex', 'face', 'hybrid', 'adaptive'],
+                        help='Initialization strategy (default: adaptive)')
+    
+    parser.add_argument('--target-gaussians', type=int, default=None,
+                        help='Target number of gaussians (default: auto)')
+    
+    parser.add_argument('--samples-per-face', type=int, default=10,
+                        help='Samples per face for face strategy (default: 10)')
+    
+    parser.add_argument('--scale-multiplier', type=float, default=1.0,
+                        help='Scale multiplier for gaussians (default: 1.0)')
+    
+    parser.add_argument('--opacity', type=float, default=0.9,
+                        help='Default opacity 0-1 (default: 0.9)')
+    
+    parser.add_argument('--optimize', action='store_true',
+                        help='Run quick optimization (requires PyTorch)')
+    
+    parser.add_argument('--optimization-iterations', type=int, default=100,
+                        help='Optimization iterations (default: 100)')
+    
+    parser.add_argument('--device', type=str, default='cpu',
+                        choices=['cpu', 'cuda'],
+                        help='Device for optimization (default: cpu)')
+    
+    parser.add_argument('--lod', type=str, default=None,
+                        help='Generate LODs with comma-separated counts (e.g., 5000,25000,100000)')
+    
+    args = parser.parse_args()
+    
+    # Validate input file
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"Error: Input file not found: {args.input}", file=sys.stderr)
+        return 1
+    
+    # Create config
+    config = ConversionConfig(
+        initialization_strategy=args.strategy,
+        target_gaussians=args.target_gaussians,
+        samples_per_face=args.samples_per_face,
+        scale_multiplier=args.scale_multiplier,
+        opacity_default=args.opacity,
+        optimize=args.optimize,
+        optimization_iterations=args.optimization_iterations,
+        device=args.device
+    )
+    
+    # Create converter
+    print(f"Converting {args.input} to gaussian splat...")
+    print(f"Strategy: {config.initialization_strategy}")
+    
+    converter = MeshToGaussianConverter(config)
+    
+    try:
+        # Convert
+        gaussians = converter.convert(args.input)
+        print(f"Generated {gaussians.count} gaussians")
+        
+        # Save main output
+        output_path = Path(args.output)
+        save_ply(gaussians, output_path)
+        print(f"Saved to {args.output}")
+        
+        # Generate LODs if requested
+        if args.lod:
+            lod_counts = [int(x.strip()) for x in args.lod.split(',')]
+            print(f"Generating LODs: {lod_counts}")
+            
+            lods = converter.generate_lods(gaussians, lod_counts)
+            
+            for count, lod in zip(sorted(lod_counts), lods):
+                lod_path = output_path.with_stem(f"{output_path.stem}_lod{count}")
+                save_ply(lod, lod_path)
+                print(f"  LOD {count}: {lod.count} gaussians -> {lod_path}")
+        
+        print("✅ Conversion complete!")
+        return 0
+        
+    except Exception as e:
+        print(f"Error during conversion: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
