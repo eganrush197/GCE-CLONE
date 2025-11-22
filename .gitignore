@@ -47,6 +47,11 @@ output/
 cache/
 models/
 
+# Test outputs
+test_cube.obj
+test_output*.ply
+test_*.ply
+
 # OS
 .DS_Store
 Thumbs.db
