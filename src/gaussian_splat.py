@@ -10,7 +10,31 @@ from typing import Optional
 class GaussianSplat:
     """
     Represents a collection of 3D gaussian splats.
-    
+
+    ⚠️ NOTE: This class is NOT used by the default conversion pipeline!
+
+    The main conversion pipeline (MeshToGaussianConverter) uses List[_SingleGaussian]
+    for flexibility and simplicity. This class is provided for advanced use cases
+    where you need batch operations on gaussian collections.
+
+    Use cases for this class:
+    - Custom batch processing of gaussians
+    - Integration with external tools that expect collection-based data
+    - Advanced manipulation requiring vectorized operations
+
+    For standard mesh-to-gaussian conversion, use:
+        converter = MeshToGaussianConverter()
+        gaussians = converter.mesh_to_gaussians(mesh)  # Returns List[_SingleGaussian]
+
+    To convert between formats:
+        # List[_SingleGaussian] → GaussianSplat (manual conversion needed)
+        positions = np.array([g.position for g in gaussians])
+        scales = np.array([g.scales for g in gaussians])
+        rotations = np.array([g.rotation for g in gaussians])
+        colors = np.array([g.sh_dc + 0.5 for g in gaussians])  # Convert SH DC back to RGB
+        opacity = np.array([g.opacity for g in gaussians])
+        splat = GaussianSplat(positions, scales, rotations, colors, opacity)
+
     Attributes:
         positions: (N, 3) array of gaussian centers
         scales: (N, 3) array of gaussian scales (log space)

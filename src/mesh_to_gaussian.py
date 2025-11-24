@@ -388,69 +388,7 @@ class MeshToGaussianConverter:
             optimized.append(opt_g)
         
         return optimized
-    
-    def generate_lod(self, gaussians: List[_SingleGaussian],
-                    target_count: int,
-                    strategy: str = 'opacity') -> List[_SingleGaussian]:
-        """
-        Generate LOD by pruning gaussians
-        Strategies:
-        - 'opacity': Keep most opaque gaussians
-        - 'spatial': Spatial subsampling
-        - 'size': Keep larger gaussians
-        """
-        if len(gaussians) <= target_count:
-            return gaussians
-        
-        if strategy == 'opacity':
-            # Sort by opacity and keep top N
-            sorted_gaussians = sorted(gaussians, 
-                                    key=lambda g: g.opacity, 
-                                    reverse=True)
-            return sorted_gaussians[:target_count]
-        
-        elif strategy == 'spatial':
-            # Simple spatial subsampling using clustering
-            positions = np.array([g.position for g in gaussians])
-            
-            # K-means style sampling
-            indices = []
-            remaining = list(range(len(gaussians)))
-            
-            # Start with random gaussian
-            idx = np.random.choice(remaining)
-            indices.append(idx)
-            remaining.remove(idx)
-            
-            # Greedily select furthest gaussians
-            while len(indices) < target_count and remaining:
-                selected_pos = positions[indices]
-                max_dist = -1
-                best_idx = None
-                
-                for idx in remaining[:1000]:  # Limit search for speed
-                    dists = np.linalg.norm(positions[idx] - selected_pos, axis=1)
-                    min_dist = np.min(dists)
-                    if min_dist > max_dist:
-                        max_dist = min_dist
-                        best_idx = idx
-                
-                if best_idx is not None:
-                    indices.append(best_idx)
-                    remaining.remove(best_idx)
-            
-            return [gaussians[i] for i in indices]
-        
-        elif strategy == 'size':
-            # Keep larger gaussians
-            sorted_gaussians = sorted(gaussians,
-                                    key=lambda g: np.prod(g.scales),
-                                    reverse=True)
-            return sorted_gaussians[:target_count]
-        
-        else:
-            raise ValueError(f"Unknown strategy: {strategy}")
-    
+
     def save_ply(self, gaussians: List[_SingleGaussian],
                  output_path: str):
         """Save gaussians to PLY format compatible with gaussian splatting viewers"""
@@ -528,6 +466,8 @@ class MeshToGaussianConverter:
         print(f"Saved {vertex_count} gaussians to {output_path}")
 
 def main():
+    from lod_generator import LODGenerator
+
     parser = argparse.ArgumentParser(description='Simple mesh to gaussian converter')
     parser.add_argument('input', help='Input mesh file (OBJ/GLB)')
     parser.add_argument('output', help='Output PLY file')
@@ -539,36 +479,38 @@ def main():
     parser.add_argument('--lod', type=int, nargs='*',
                        default=[5000, 25000, 100000],
                        help='LOD levels to generate')
-    
+
     args = parser.parse_args()
-    
+
     # Initialize converter
     converter = MeshToGaussianConverter()
-    
+
     # Load mesh
     mesh = converter.load_mesh(args.input)
-    
+
     # Convert to gaussians
     gaussians = converter.mesh_to_gaussians(mesh, strategy=args.strategy)
-    
+
     # Optimize if requested
     if args.optimize > 0 and TORCH_AVAILABLE and torch.cuda.is_available():
         gaussians = converter.optimize_gaussians(gaussians, iterations=args.optimize)
     elif args.optimize > 0:
         print("Optimization requested but PyTorch/CUDA not available")
-    
+
     # Save full resolution
     base_name = Path(args.output).stem
     output_dir = Path(args.output).parent
-    
+
     converter.save_ply(gaussians, args.output)
-    
-    # Generate LODs
-    for lod_count in args.lod:
-        if lod_count < len(gaussians):
-            lod_gaussians = converter.generate_lod(gaussians, lod_count, strategy='opacity')
-            lod_path = output_dir / f"{base_name}_lod_{lod_count}.ply"
-            converter.save_ply(lod_gaussians, str(lod_path))
+
+    # Generate LODs using LODGenerator
+    if args.lod:
+        lod_gen = LODGenerator(strategy='importance')
+        for lod_count in args.lod:
+            if lod_count < len(gaussians):
+                lod_gaussians = lod_gen.generate_lod(gaussians, lod_count)
+                lod_path = output_dir / f"{base_name}_lod_{lod_count}.ply"
+                converter.save_ply(lod_gaussians, str(lod_path))
 
 if __name__ == '__main__':
     main()

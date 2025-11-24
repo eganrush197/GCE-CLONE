@@ -9,7 +9,40 @@ if TYPE_CHECKING:
 
 
 class LODGenerator:
-    """Generates multiple levels of detail from a gaussian splat."""
+    """
+    Generates multiple levels of detail (LOD) from gaussian splats.
+
+    LOD generation reduces the number of gaussians while preserving visual quality
+    by intelligently selecting which gaussians to keep based on different strategies.
+
+    Available Pruning Strategies:
+
+    1. 'importance' (RECOMMENDED - Best Quality)
+       - Keeps gaussians with highest visual impact
+       - Metric: opacity × volume (product of scales)
+       - Best for: General use, balanced quality/performance
+       - Example: Large, opaque gaussians are kept; small, transparent ones removed
+
+    2. 'opacity' (Fast, Good Quality)
+       - Keeps most opaque gaussians
+       - Metric: opacity value only
+       - Best for: When opacity is the primary quality indicator
+       - Example: Fully opaque gaussians kept; transparent ones removed
+
+    3. 'spatial' (Uniform Coverage)
+       - Voxel-based spatial subsampling
+       - Metric: spatial distribution in 3D grid
+       - Best for: Maintaining uniform coverage across the model
+       - Example: One gaussian per voxel, evenly distributed
+
+    Usage:
+        # Generate single LOD
+        lod_gen = LODGenerator(strategy='importance')
+        lod_5k = lod_gen.generate_lod(gaussians, 5000)
+
+        # Generate multiple LODs
+        lods = lod_gen.generate_lods(gaussians, [5000, 25000, 100000])
+    """
 
     def __init__(self, strategy: str = 'importance'):
         """
@@ -17,13 +50,14 @@ class LODGenerator:
 
         Args:
             strategy: Pruning strategy - 'importance', 'opacity', or 'spatial'
+                     Default: 'importance' (recommended for best quality)
         """
         self.strategy = strategy
 
         if strategy not in ['importance', 'opacity', 'spatial']:
-            raise ValueError(f"Unknown strategy: {strategy}")
+            raise ValueError(f"Unknown strategy: {strategy}. Must be 'importance', 'opacity', or 'spatial'")
     
-    def generate_lod(self, gaussians: List, target_count: int, strategy: str = None) -> List:
+    def generate_lod(self, gaussians: 'List[_SingleGaussian]', target_count: int, strategy: str = None) -> 'List[_SingleGaussian]':
         """
         Generate a single LOD level.
 
@@ -49,7 +83,7 @@ class LODGenerator:
 
         return result
 
-    def generate_lods(self, gaussians: List, target_counts: List[int]) -> List[List]:
+    def generate_lods(self, gaussians: 'List[_SingleGaussian]', target_counts: List[int]) -> 'List[List[_SingleGaussian]]':
         """
         Generate multiple LOD levels.
 
@@ -68,7 +102,7 @@ class LODGenerator:
 
         return lods
 
-    def _prune_to_count(self, gaussians: List, target_count: int) -> List:
+    def _prune_to_count(self, gaussians: 'List[_SingleGaussian]', target_count: int) -> 'List[_SingleGaussian]':
         """Prune gaussians to target count using selected strategy."""
         if self.strategy == 'importance':
             return self._prune_by_importance(gaussians, target_count)
@@ -77,7 +111,7 @@ class LODGenerator:
         elif self.strategy == 'spatial':
             return self._prune_by_spatial(gaussians, target_count)
     
-    def _prune_by_importance(self, gaussians: List, target_count: int) -> List:
+    def _prune_by_importance(self, gaussians: 'List[_SingleGaussian]', target_count: int) -> 'List[_SingleGaussian]':
         """
         Prune by importance score (opacity * volume).
 
@@ -98,7 +132,7 @@ class LODGenerator:
 
         return [gaussians[i] for i in sorted(indices)]
     
-    def _prune_by_opacity(self, gaussians: List, target_count: int) -> List:
+    def _prune_by_opacity(self, gaussians: 'List[_SingleGaussian]', target_count: int) -> 'List[_SingleGaussian]':
         """
         Prune by opacity threshold.
 
@@ -111,7 +145,7 @@ class LODGenerator:
 
         return [gaussians[i] for i in sorted(indices)]
     
-    def _prune_by_spatial(self, gaussians: List, target_count: int) -> List:
+    def _prune_by_spatial(self, gaussians: 'List[_SingleGaussian]', target_count: int) -> 'List[_SingleGaussian]':
         """
         Prune by spatial subsampling.
 

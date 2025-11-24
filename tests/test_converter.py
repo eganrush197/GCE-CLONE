@@ -11,7 +11,7 @@ import os
 # Add parent directory to path so we can import src
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
+from src.mesh_to_gaussian import MeshToGaussianConverter
 from src.gaussian_splat import GaussianSplat
 from src.lod_generator import LODGenerator
 import trimesh
@@ -32,7 +32,7 @@ def simple_sphere():
 @pytest.fixture
 def converter():
     """Create a basic converter."""
-    return MeshToGaussianConverter()
+    return MeshToGaussianConverter(device='cpu')
 
 
 class TestGaussianSplat:
@@ -75,12 +75,9 @@ class TestGaussianSplat:
 
 class TestMeshToGaussianConverter:
     """Test mesh-to-gaussian conversion."""
-    
+
     def test_vertex_strategy(self, simple_cube, converter):
         """Test vertex-based initialization."""
-        config = ConversionConfig(initialization_strategy='vertex')
-        converter = MeshToGaussianConverter(config)
-
         # Save cube to temp file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
             temp_path = Path(f.name)
@@ -88,24 +85,26 @@ class TestMeshToGaussianConverter:
         try:
             simple_cube.export(temp_path)
 
-            gaussians = converter.convert(temp_path)
+            # Load mesh and convert with vertex strategy
+            mesh = converter.load_mesh(str(temp_path))
+            gaussians = converter.mesh_to_gaussians(mesh, strategy='vertex')
 
             # Should have one gaussian per vertex
-            assert gaussians.count == len(simple_cube.vertices)
-            assert gaussians.positions.shape == (len(simple_cube.vertices), 3)
+            assert len(gaussians) == len(simple_cube.vertices)
+            assert len(gaussians) > 0
+            # Check first gaussian has correct structure
+            assert hasattr(gaussians[0], 'position')
+            assert hasattr(gaussians[0], 'scales')
+            assert hasattr(gaussians[0], 'rotation')
+            assert hasattr(gaussians[0], 'opacity')
+            assert hasattr(gaussians[0], 'sh_dc')
         finally:
             # Clean up
             if temp_path.exists():
                 temp_path.unlink()
-    
+
     def test_face_strategy(self, simple_sphere, converter):
         """Test face-based initialization."""
-        config = ConversionConfig(
-            initialization_strategy='face',
-            samples_per_face=5
-        )
-        converter = MeshToGaussianConverter(config)
-
         # Save sphere to temp file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
             temp_path = Path(f.name)
@@ -113,62 +112,110 @@ class TestMeshToGaussianConverter:
         try:
             simple_sphere.export(temp_path)
 
-            gaussians = converter.convert(temp_path)
+            # Load mesh and convert with face strategy
+            mesh = converter.load_mesh(str(temp_path))
+            gaussians = converter.mesh_to_gaussians(mesh, strategy='face', samples_per_face=5)
 
-            # Should have multiple gaussians
-            assert gaussians.count > 0
-            assert gaussians.positions.shape[1] == 3
+            # Should have multiple gaussians (faces * samples_per_face)
+            assert len(gaussians) > 0
+            assert len(gaussians) >= len(simple_sphere.faces)
+            # Check structure
+            assert hasattr(gaussians[0], 'position')
+            assert hasattr(gaussians[0], 'sh_dc')
         finally:
             # Clean up
             if temp_path.exists():
                 temp_path.unlink()
-    
-    def test_color_extraction(self, simple_cube):
-        """Test color extraction from mesh."""
-        converter = MeshToGaussianConverter()
-        
-        # Cube should have default colors
-        colors = converter._extract_vertex_colors(simple_cube)
-        
-        assert colors.shape == (len(simple_cube.vertices), 3)
-        assert np.all(colors >= 0) and np.all(colors <= 1)
+
+    def test_hybrid_strategy(self, simple_cube, converter):
+        """Test hybrid strategy (vertex + face)."""
+        # Save cube to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            simple_cube.export(temp_path)
+
+            # Load mesh and convert with hybrid strategy
+            mesh = converter.load_mesh(str(temp_path))
+            gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
+
+            # Should have more gaussians than just vertices
+            assert len(gaussians) > len(simple_cube.vertices)
+            assert len(gaussians) > 0
+        finally:
+            # Clean up
+            if temp_path.exists():
+                temp_path.unlink()
 
 
 class TestLODGenerator:
     """Test LOD generation."""
-    
-    def test_importance_pruning(self):
+
+    def test_importance_pruning(self, simple_cube, converter):
         """Test importance-based pruning."""
-        # Create test gaussians
-        n = 1000
-        gaussians = GaussianSplat(
-            positions=np.random.randn(n, 3),
-            scales=np.random.randn(n, 3),
-            rotations=np.random.randn(n, 4),
-            colors=np.random.rand(n, 3),
-            opacity=np.random.randn(n)
-        )
-        
-        lod_gen = LODGenerator(strategy='importance')
-        lods = lod_gen.generate_lods(gaussians, [100, 500])
-        
-        assert len(lods) == 2
-        assert lods[0].count <= 500
-        assert lods[1].count <= 100
-    
-    def test_opacity_pruning(self):
+        # Create test gaussians from a real mesh
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            simple_cube.export(temp_path)
+            mesh = converter.load_mesh(str(temp_path))
+            gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
+
+            # Generate LODs
+            lod_gen = LODGenerator(strategy='importance')
+            lods = lod_gen.generate_lods(gaussians, [10, 20])
+
+            assert len(lods) == 2
+            assert len(lods[0]) <= 20  # First LOD (sorted descending)
+            assert len(lods[1]) <= 10  # Second LOD
+            assert len(lods[1]) <= len(lods[0])  # Smaller LOD has fewer gaussians
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def test_opacity_pruning(self, simple_sphere, converter):
         """Test opacity-based pruning."""
-        n = 1000
-        gaussians = GaussianSplat(
-            positions=np.random.randn(n, 3),
-            scales=np.random.randn(n, 3),
-            rotations=np.random.randn(n, 4),
-            colors=np.random.rand(n, 3),
-            opacity=np.random.randn(n)
-        )
-        
-        lod_gen = LODGenerator(strategy='opacity')
-        lod = lod_gen._prune_to_count(gaussians, 100)
-        
-        assert lod.count == 100
+        # Create test gaussians from a real mesh
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            simple_sphere.export(temp_path)
+            mesh = converter.load_mesh(str(temp_path))
+            gaussians = converter.mesh_to_gaussians(mesh, strategy='face', samples_per_face=3)
+
+            # Generate single LOD with opacity strategy
+            lod_gen = LODGenerator(strategy='opacity')
+            target_count = min(50, len(gaussians) // 2)
+            lod = lod_gen.generate_lod(gaussians, target_count)
+
+            assert len(lod) == target_count
+            assert len(lod) < len(gaussians)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def test_spatial_pruning(self, simple_cube, converter):
+        """Test spatial-based pruning."""
+        # Create test gaussians from a real mesh
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.obj', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            simple_cube.export(temp_path)
+            mesh = converter.load_mesh(str(temp_path))
+            gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
+
+            # Generate LOD with spatial strategy
+            lod_gen = LODGenerator(strategy='spatial')
+            target_count = min(15, len(gaussians) // 2)
+            lod = lod_gen.generate_lod(gaussians, target_count)
+
+            assert len(lod) <= target_count
+            assert len(lod) > 0
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
