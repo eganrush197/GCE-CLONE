@@ -19,33 +19,48 @@ Converting 3D mesh models (OBJ/GLB files) into gaussian splat representations (P
 
 ```
 PROJECT FILES:
-├── PROJECT_DOCUMENTATION.md         # Complete 950+ line documentation (START HERE)
-├── mesh_to_gaussian_simple.py      # Core converter (380 lines, fully functional)
-├── mesh_to_gaussian_enhanced.py    # Production features (450 lines)
-├── mesh2gaussian                    # CLI tool (200 lines)
-├── test_converter.py                # Test suite (100 lines)
-├── requirements_simple.txt          # Minimal dependencies
-└── README.md                        # User guide
+├── README.md                        # User guide (START HERE)
+├── QUICKSTART.md                    # Quick start guide
+├── src/
+│   ├── mesh_to_gaussian.py         # Core converter with color support
+│   ├── gaussian_splat.py           # Data structures
+│   ├── lod_generator.py            # LOD generation
+│   └── ply_io.py                   # PLY file I/O
+├── convert.py                       # Simple wrapper script
+├── mesh2gaussian                    # CLI tool
+├── test_conversion.py               # End-to-end test
+├── tests/test_converter.py          # Unit tests
+├── requirements.txt                 # Dependencies
+└── setup.py                         # Package setup
 
-REFERENCE DOCUMENTS:
-├── Model_Context.md                 # Development philosophy/rules
-└── Gaussian_Mesh_Conversion_Engine_LATEST_VERSION.md  # Original spec
+PROJECT CONTEXT DOCUMENTS:
+├── COLOR & TEXTURE SUPPORT.md       # Color implementation details
+├── COLOR_ENHANCEMENTS_PLAN.md       # Future color features
+├── GAUSSIAN_MESH_CONVERSION_PROJECT_DOCUMENTATION.md  # Full docs
+└── MODEL_CONTEXT.txt                # Development philosophy
 ```
 
 ### How to Get Started (10 Minutes)
 
 ```bash
 # 1. Install dependencies (no CUDA required!)
-pip install trimesh numpy scipy pillow pygltflib
+pip install -r requirements.txt
 
 # 2. Test it works
-python test_converter.py
+python test_conversion.py
 
 # 3. Try a conversion
-python mesh_to_gaussian_simple.py any_model.obj output.ply
+python convert.py any_model.obj output.ply
 
 # 4. Use the CLI for production
-python mesh2gaussian model.obj output.ply --lod 5000 25000 100000 --verbose
+python mesh2gaussian model.obj output.ply --strategy hybrid
+
+# 5. Optional: Install PyTorch for optimization
+# Create virtual environment first
+python -m venv venv
+.\venv\Scripts\Activate.ps1  # Windows
+# source venv/bin/activate    # Linux/Mac
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### Key Technical Decisions Explained
@@ -61,10 +76,10 @@ python mesh2gaussian model.obj output.ply --lod 5000 25000 100000 --verbose
    - CUDA remains optional for those who have it working
 
 3. **Why This Architecture?**
-   - Single-file core (`mesh_to_gaussian_simple.py`) can work standalone
-   - Enhanced version adds features without breaking core
-   - CLI provides user-friendly interface
-   - Modular design allows easy extension
+   - Modular design with separate concerns (converter, I/O, LOD, data structures)
+   - Simple wrapper script (`convert.py`) for quick usage
+   - Full-featured CLI tool (`mesh2gaussian`) for production
+   - Easy to extend and maintain
 
 ### Understanding the Code Flow
 
@@ -129,22 +144,22 @@ save_ply(gaussians, "output.ply")
 
 **Python API:**
 ```python
-from mesh_to_gaussian_simple import MeshToGaussianConverter
+from src.mesh_to_gaussian import MeshToGaussianConverter
 
 converter = MeshToGaussianConverter()
-mesh = converter.load_mesh("model.obj")
-gaussians = converter.mesh_to_gaussians(mesh)
+mesh = converter.load_mesh("model.obj")  # Auto-loads colors from MTL
+gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
 converter.save_ply(gaussians, "output.ply")
 ```
 
-**Command Line:**
+**Simple Wrapper:**
 ```bash
-python mesh2gaussian input.obj output.ply --lod 5000 25000
+python convert.py input.obj output.ply
 ```
 
-**Batch Processing:**
+**Full CLI:**
 ```bash
-python mesh2gaussian *.obj output_dir/ --batch --report results.json
+python mesh2gaussian input.obj output.ply --strategy hybrid
 ```
 
 ### What's Production-Ready vs What Needs Work
@@ -153,14 +168,17 @@ python mesh2gaussian *.obj output_dir/ --batch --report results.json
 - ✅ Core conversion algorithm
 - ✅ LOD generation
 - ✅ PLY export
-- ✅ Batch processing
-- ✅ Basic optimization
+- ✅ MTL color parsing with quad-to-triangle handling
+- ✅ Multiple initialization strategies (vertex, face, hybrid, adaptive)
+- ✅ Fallback color system for robustness
 
 **Needs Enhancement:**
-- ⚠️ Texture transfer from UV maps (partial support)
+- ⚠️ PyTorch optimization (installed but slow to import on Windows)
+- ⚠️ UV texture sampling (planned - see COLOR_ENHANCEMENTS_PLAN.md)
+- ⚠️ Ambient/specular color support (planned)
 - ⚠️ Animation/rigging (not implemented)
 - ⚠️ Very large meshes (>10M vertices) need streaming
-- ⚠️ Web API wrapper (FastAPI example provided)
+- ⚠️ Batch processing (CLI supports single files currently)
 
 ### Critical Things to Know
 
@@ -178,25 +196,32 @@ python mesh2gaussian *.obj output_dir/ --batch --report results.json
 
 **Adding a new initialization strategy:**
 ```python
-# In mesh_to_gaussian_simple.py
-def your_strategy(mesh, **kwargs):
-    gaussians = []
+# In src/mesh_to_gaussian.py, mesh_to_gaussians() method
+# Add your strategy to the if/elif chain
+elif strategy == 'your_strategy':
     # Your initialization logic
-    return gaussians
-
-# Register in mesh_to_gaussians() method
-if strategy == 'your_strategy':
-    return your_strategy(mesh)
+    for vertex in mesh.vertices:
+        # Create gaussians
+        gaussians.append(GaussianSplat(...))
 ```
 
 **Adding a new LOD strategy:**
 ```python
-# In generate_lod() method
-elif strategy == 'your_metric':
+# In src/lod_generator.py
+# Add your strategy to the LODGenerator class
+def generate_lod_your_method(self, gaussians, target_count):
     # Score gaussians by your metric
     scores = calculate_your_scores(gaussians)
     indices = np.argsort(scores)[-target_count:]
-    return [gaussians[i] for i in indices]
+    return gaussians.subset(indices)
+```
+
+**Adding color enhancements:**
+```python
+# See COLOR_ENHANCEMENTS_PLAN.md for detailed plans on:
+# - UV texture sampling
+# - Color validation helpers
+# - Ambient/specular color support
 ```
 
 ### Contact & Context
@@ -212,14 +237,23 @@ The original plan (see `Gaussian_Mesh_Conversion_Engine_LATEST_VERSION.md`) was 
 
 ### Final Notes
 
-- Total development time: ~4 hours (vs weeks for original plan)
-- Lines of code: ~1,200 (vs 10,000+ for original plan)
-- Dependencies: 5 Python packages (vs 20+ plus CUDA SDK)
-- Time to convert mesh: Seconds (vs hours)
+**Current State (2024):**
+- Core converter: Fully functional with color support
+- Dependencies: 5 Python packages (PyTorch optional)
+- Time to convert mesh: 1-30 seconds (CPU), faster with GPU
+- Color support: MTL parsing with automatic quad-to-triangle handling
+- Virtual environment: Recommended for PyTorch installation
+
+**Recent Improvements:**
+- ✅ Fixed critical bug: undefined `face_idx` variable
+- ✅ Added adaptive strategy support (maps to hybrid)
+- ✅ Implemented quad-to-triangle face conversion
+- ✅ Added fallback color system for robustness
+- ✅ Removed non-existent `ConversionConfig` references
 
 This is a tool built by engineers for engineers. It does one thing well: convert meshes to gaussian splats quickly and reliably. Everything else is optional.
 
-Good luck, and feel free to rip out anything that doesn't serve your needs. The code is intentionally simple so you can understand and modify it easily.
+Good luck, and feel free to extend it as needed. The code is intentionally modular so you can understand and modify it easily.
 
 ---
 

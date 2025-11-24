@@ -9,8 +9,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
-from mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
+from mesh_to_gaussian import MeshToGaussianConverter
 from ply_io import save_ply
+from lod_generator import LODGenerator
 
 
 def main():
@@ -59,52 +60,49 @@ Examples:
                         help='Generate LODs with comma-separated counts (e.g., 5000,25000,100000)')
     
     args = parser.parse_args()
-    
+
     # Validate input file
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"Error: Input file not found: {args.input}", file=sys.stderr)
         return 1
-    
-    # Create config
-    config = ConversionConfig(
-        initialization_strategy=args.strategy,
-        target_gaussians=args.target_gaussians,
-        samples_per_face=args.samples_per_face,
-        scale_multiplier=args.scale_multiplier,
-        opacity_default=args.opacity,
-        optimize=args.optimize,
-        optimization_iterations=args.optimization_iterations,
-        device=args.device
-    )
-    
+
     # Create converter
     print(f"Converting {args.input} to gaussian splat...")
-    print(f"Strategy: {config.initialization_strategy}")
-    
-    converter = MeshToGaussianConverter(config)
-    
+    print(f"Strategy: {args.strategy}")
+    print(f"Samples per face: {args.samples_per_face}")
+
+    converter = MeshToGaussianConverter(device=args.device)
+
     try:
-        # Convert
-        gaussians = converter.convert(args.input)
-        print(f"Generated {gaussians.count} gaussians")
+        # Load mesh
+        mesh = converter.load_mesh(str(input_path))
+
+        # Convert to gaussians
+        gaussians = converter.mesh_to_gaussians(
+            mesh,
+            strategy=args.strategy,
+            samples_per_face=args.samples_per_face
+        )
+        print(f"Generated {len(gaussians)} gaussians")
         
         # Save main output
         output_path = Path(args.output)
-        save_ply(gaussians, output_path)
+        converter.save_ply(gaussians, str(output_path))
         print(f"Saved to {args.output}")
-        
+
         # Generate LODs if requested
         if args.lod:
             lod_counts = [int(x.strip()) for x in args.lod.split(',')]
             print(f"Generating LODs: {lod_counts}")
-            
-            lods = converter.generate_lods(gaussians, lod_counts)
-            
-            for count, lod in zip(sorted(lod_counts), lods):
+
+            lod_gen = LODGenerator()
+
+            for count in sorted(lod_counts):
+                lod_gaussians = lod_gen.generate_lod(gaussians, count, strategy='importance')
                 lod_path = output_path.with_stem(f"{output_path.stem}_lod{count}")
-                save_ply(lod, lod_path)
-                print(f"  LOD {count}: {lod.count} gaussians -> {lod_path}")
+                converter.save_ply(lod_gaussians, str(lod_path))
+                print(f"  LOD {count}: {len(lod_gaussians)} gaussians -> {lod_path}")
         
         print("✅ Conversion complete!")
         return 0

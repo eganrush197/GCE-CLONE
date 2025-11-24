@@ -1,305 +1,574 @@
-# ABOUTME: Core mesh-to-gaussian converter implementation
-# ABOUTME: Converts OBJ/GLB meshes to gaussian splats using direct geometric conversion
+#!/usr/bin/env python3
+# ABOUTME: Direct mesh-to-gaussian converter with LOD support
+# ABOUTME: Converts OBJ/GLB meshes to gaussian splat PLY files
+
+"""
+Simplified Mesh to Gaussian Converter
+No complex multi-view rendering - direct conversion with optimization
+"""
 
 import numpy as np
 import trimesh
-from pathlib import Path
-from typing import Union, Optional, List
 from dataclasses import dataclass
+from typing import Tuple, Optional, List
+import struct
+import argparse
+from pathlib import Path
 
+# Try to import torch, but make it optional
 try:
-    from .gaussian_splat import GaussianSplat
-    from .lod_generator import LODGenerator
+    import torch
+    import torch.nn as nn
+    TORCH_AVAILABLE = True
 except ImportError:
-    from gaussian_splat import GaussianSplat
-    from lod_generator import LODGenerator
+    TORCH_AVAILABLE = False
+    print("PyTorch not available - optimization disabled")
 
-
+# Internal data structure for individual gaussians during conversion
 @dataclass
-class ConversionConfig:
-    """Configuration for mesh-to-gaussian conversion."""
-    initialization_strategy: str = 'adaptive'  # 'vertex', 'face', 'hybrid', 'adaptive'
-    target_gaussians: Optional[int] = None  # None = auto-determine
-    samples_per_face: int = 10  # For face sampling
-    scale_multiplier: float = 1.0  # Scale gaussians relative to local geometry
-    opacity_default: float = 0.9  # Default opacity [0-1]
-    optimize: bool = False  # Run quick optimization (requires PyTorch)
-    optimization_iterations: int = 100  # Quick optimization iterations
-    device: str = 'cpu'  # 'cpu' or 'cuda'
-
+class _SingleGaussian:
+    """Single gaussian splat representation (internal use only)"""
+    position: np.ndarray  # xyz
+    scales: np.ndarray     # 3D scale
+    rotation: np.ndarray   # quaternion
+    opacity: float
+    sh_dc: np.ndarray      # Spherical harmonics DC term (RGB)
+    sh_rest: Optional[np.ndarray] = None  # Higher order SH coefficients
 
 class MeshToGaussianConverter:
-    """Converts 3D meshes to gaussian splat representations."""
+    """Direct mesh to gaussian converter - no synthetic views needed"""
     
-    def __init__(self, config: Optional[ConversionConfig] = None):
-        """
-        Initialize converter.
-        
-        Args:
-            config: Conversion configuration
-        """
-        self.config = config or ConversionConfig()
-    
-    def convert(self, mesh_path: Union[str, Path]) -> GaussianSplat:
-        """
-        Convert mesh to gaussian splat.
-        
-        Args:
-            mesh_path: Path to OBJ or GLB mesh file
-            
-        Returns:
-            GaussianSplat object
-        """
-        # Load mesh
-        mesh = self._load_mesh(mesh_path)
-        
-        # Select strategy
-        strategy = self._select_strategy(mesh)
-        
-        # Initialize gaussians
-        if strategy == 'vertex':
-            gaussians = self._initialize_from_vertices(mesh)
-        elif strategy == 'face':
-            gaussians = self._initialize_from_faces(mesh)
-        elif strategy == 'hybrid':
-            gaussians = self._initialize_hybrid(mesh)
+    def __init__(self, device='cuda' if (TORCH_AVAILABLE and torch.cuda.is_available()) else 'cpu'):
+        self.device = device
+        if TORCH_AVAILABLE:
+            print(f"Using device: {device}")
         else:
-            raise ValueError(f"Unknown strategy: {strategy}")
+            print("PyTorch not available - using NumPy only mode")
         
-        # Optional optimization
-        if self.config.optimize:
-            gaussians = self._optimize(gaussians, mesh)
+    def load_mesh(self, path: str) -> trimesh.Trimesh:
+        """Load and normalize mesh, with MTL color support for OBJ files"""
         
-        return gaussians
-    
-    def _load_mesh(self, mesh_path: Union[str, Path]) -> trimesh.Trimesh:
-        """Load mesh from file."""
-        mesh_path = Path(mesh_path)
+        # Check if it's an OBJ file with potential MTL
+        if path.endswith('.obj'):
+            mesh = self._load_obj_with_mtl(path)
+        else:
+            mesh = trimesh.load(path, force='mesh')
         
-        if not mesh_path.exists():
-            raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
-        
-        mesh = trimesh.load(str(mesh_path), force='mesh')
-        
-        # Ensure mesh is a single Trimesh object
-        if isinstance(mesh, trimesh.Scene):
-            # Combine all geometries
-            mesh = trimesh.util.concatenate(
-                [geom for geom in mesh.geometry.values() if isinstance(geom, trimesh.Trimesh)]
-            )
-        
+        # Center and scale to unit cube
+        mesh.vertices -= mesh.vertices.mean(axis=0)
+        scale = np.abs(mesh.vertices).max()
+        if scale > 0:
+            mesh.vertices /= scale
+            
+        print(f"Loaded mesh: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
         return mesh
     
-    def _select_strategy(self, mesh: trimesh.Trimesh) -> str:
-        """Auto-select initialization strategy based on mesh properties."""
-        if self.config.initialization_strategy != 'adaptive':
-            return self.config.initialization_strategy
-        
-        # Adaptive selection logic
-        vertex_count = len(mesh.vertices)
-        face_count = len(mesh.faces)
-        
-        # Low poly: use vertex strategy
-        if vertex_count < 1000:
-            return 'vertex'
-        
-        # High poly with textures: use face strategy
-        if face_count > 10000 and mesh.visual.kind == 'texture':
-            return 'face'
-        
-        # Default: hybrid
-        return 'hybrid'
+    def _load_obj_with_mtl(self, obj_path: str) -> trimesh.Trimesh:
+        """Special OBJ loader that preserves MTL material colors"""
+        from pathlib import Path
+
+        # First load with trimesh
+        mesh = trimesh.load(obj_path, force='mesh', process=False)
+
+        # Check for MTL file
+        mtl_path = Path(obj_path).with_suffix('.mtl')
+        if not mtl_path.exists():
+            return mesh
+
+        print(f"Found MTL file: {mtl_path}")
+
+        # Parse MTL for material colors
+        materials = {}
+        current_mat = None
+
+        with open(mtl_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+
+                if parts[0] == 'newmtl':
+                    current_mat = parts[1]
+                    materials[current_mat] = [0.7, 0.7, 0.7]
+
+                elif parts[0] == 'Kd' and current_mat:
+                    try:
+                        materials[current_mat] = [float(parts[1]), float(parts[2]), float(parts[3])]
+                    except:
+                        pass
+
+        # Now parse OBJ to map materials to faces
+        face_colors = []
+        current_material = None
+
+        with open(obj_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+
+                if parts[0] == 'usemtl':
+                    current_material = parts[1]
+
+                elif parts[0] == 'f':
+                    # Face found, assign current material color
+                    color = materials.get(current_material, [0.7, 0.7, 0.7])
+
+                    # Count vertices in this face (handles quads, tris, etc.)
+                    # OBJ faces can be: f v1 v2 v3 (triangle) or f v1 v2 v3 v4 (quad)
+                    # or f v1/vt1/vn1 v2/vt2/vn2 ... (with texture/normal indices)
+                    num_vertices = len(parts) - 1  # Subtract 'f' command
+
+                    # Trimesh triangulates: quads (4 verts) → 2 triangles, etc.
+                    # For n-gon: (n-2) triangles
+                    num_triangles = max(1, num_vertices - 2)
+
+                    # Add color for each resulting triangle
+                    for _ in range(num_triangles):
+                        face_colors.append(color)
+
+        # Apply face colors to mesh - but only if counts match!
+        if face_colors and len(face_colors) == len(mesh.faces):
+            face_colors = np.array(face_colors)
+            # Ensure colors are in 0-255 range for trimesh
+            if face_colors.max() <= 1.0:
+                face_colors = (face_colors * 255).astype(np.uint8)
+
+            # Add alpha channel
+            face_colors = np.column_stack([face_colors, np.full(len(face_colors), 255)])
+
+            mesh.visual = trimesh.visual.ColorVisuals(
+                mesh=mesh,
+                face_colors=face_colors
+            )
+            print(f"✓ Applied {len(materials)} material colors to {len(face_colors)} faces")
+        elif face_colors:
+            print(f"⚠️  Warning: Face color count mismatch ({len(face_colors)} colors vs {len(mesh.faces)} faces)")
+            print(f"   Attempting to use default color for all faces...")
+            # Fallback: use first material color or gray for all faces
+            default_color = list(materials.values())[0] if materials else [0.7, 0.7, 0.7]
+            face_colors = np.array([default_color] * len(mesh.faces))
+            if face_colors.max() <= 1.0:
+                face_colors = (face_colors * 255).astype(np.uint8)
+            face_colors = np.column_stack([face_colors, np.full(len(face_colors), 255)])
+            mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, face_colors=face_colors)
+            print(f"   Using fallback color for all {len(mesh.faces)} faces")
+
+        return mesh
     
-    def _initialize_from_vertices(self, mesh: trimesh.Trimesh) -> GaussianSplat:
-        """Initialize gaussians at mesh vertices."""
-        positions = mesh.vertices.copy()
-        n = len(positions)
+    def mesh_to_gaussians(self, mesh: trimesh.Trimesh,
+                         strategy: str = 'vertex',
+                         samples_per_face: int = 1) -> List[_SingleGaussian]:
+        """
+        Convert mesh to initial gaussians
+        Strategies:
+        - 'vertex': One gaussian per vertex
+        - 'face': Gaussians sampled on face centers
+        - 'hybrid': Both vertices and faces
+        - 'adaptive': Auto-select based on mesh (currently maps to hybrid)
+        """
+        gaussians = []
+
+        # Map adaptive to hybrid for now
+        if strategy == 'adaptive':
+            strategy = 'hybrid'
+            print(f"Using adaptive strategy -> hybrid")
+
+        if strategy in ['vertex', 'hybrid']:
+            # Create gaussians from vertices
+            for i, vertex in enumerate(mesh.vertices):
+                # Get vertex normal if available
+                normal = mesh.vertex_normals[i] if hasattr(mesh, 'vertex_normals') else np.array([0, 0, 1])
+                
+                # Initial scale based on nearby vertices
+                if i < len(mesh.vertices) - 1:
+                    nearby_dists = np.linalg.norm(mesh.vertices - vertex, axis=1)
+                    nearby_dists = nearby_dists[nearby_dists > 0]
+                    scale = np.min(nearby_dists) * 0.5 if len(nearby_dists) > 0 else 0.01
+                else:
+                    scale = 0.01
+                
+                # Convert normal to quaternion (simplified - align Z axis with normal)
+                # This is a hack but works for initialization
+                quat = self._normal_to_quaternion(normal)
+                
+                # Get color from vertex colors or use default
+                if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
+                    color = mesh.visual.vertex_colors[i][:3]
+                    if color.max() > 1.0:
+                        color = color / 255.0
+                elif hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
+                    # Find a face containing this vertex and use its color
+                    for face_idx, face in enumerate(mesh.faces):
+                        if i in face:
+                            color = mesh.visual.face_colors[face_idx][:3]
+                            if color.max() > 1.0:
+                                color = color / 255.0
+                            break
+                    else:
+                        color = np.array([0.5, 0.5, 0.5])
+                else:
+                    color = np.array([0.5, 0.5, 0.5])
+                
+                gaussian = _SingleGaussian(
+                    position=vertex,
+                    scales=np.array([scale, scale, scale * 0.5]),  # Slightly flattened
+                    rotation=quat,
+                    opacity=0.9,
+                    sh_dc=color - 0.5  # SH DC term centered at 0
+                )
+                gaussians.append(gaussian)
         
-        # Extract colors
-        colors = self._extract_vertex_colors(mesh)
+        if strategy in ['face', 'hybrid']:
+            # Sample gaussians on faces
+            for face_idx, face in enumerate(mesh.faces):
+                for _ in range(samples_per_face):
+                    # Random point on triangle
+                    r1, r2 = np.random.random(2)
+                    sqrt_r1 = np.sqrt(r1)
+                    
+                    w1 = 1 - sqrt_r1
+                    w2 = sqrt_r1 * (1 - r2)
+                    w3 = sqrt_r1 * r2
+                    
+                    point = (w1 * mesh.vertices[face[0]] + 
+                           w2 * mesh.vertices[face[1]] + 
+                           w3 * mesh.vertices[face[2]])
+                    
+                    # Face normal
+                    v1 = mesh.vertices[face[1]] - mesh.vertices[face[0]]
+                    v2 = mesh.vertices[face[2]] - mesh.vertices[face[0]]
+                    normal = np.cross(v1, v2)
+                    normal = normal / (np.linalg.norm(normal) + 1e-8)
+                    
+                    # Scale based on face area
+                    area = np.linalg.norm(np.cross(v1, v2)) * 0.5
+                    scale = np.sqrt(area) * 0.3
+                    
+                    quat = self._normal_to_quaternion(normal)
+                    
+                    # Interpolate vertex colors if available
+                    if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
+                        v_colors = mesh.visual.vertex_colors[face][:, :3]
+                        # Normalize to 0-1 range
+                        if v_colors.max() > 1.0:
+                            v_colors = v_colors / 255.0
+                        color = (w1 * v_colors[0] +
+                               w2 * v_colors[1] + 
+                               w3 * v_colors[2])
+                    elif hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
+                        # Use face color
+                        face_color = mesh.visual.face_colors[face_idx][:3]
+                        if face_color.max() > 1.0:
+                            color = face_color / 255.0
+                        else:
+                            color = face_color
+                    else:
+                        color = np.array([0.5, 0.5, 0.5])
+                    
+                    gaussian = _SingleGaussian(
+                        position=point,
+                        scales=np.array([scale, scale, scale * 0.3]),
+                        rotation=quat,
+                        opacity=0.7,
+                        sh_dc=color - 0.5
+                    )
+                    gaussians.append(gaussian)
         
-        # Estimate scales from local geometry
-        scales = self._estimate_scales_from_vertices(mesh)
-        
-        # Compute rotations from normals
-        rotations = self._compute_rotations_from_normals(mesh.vertex_normals)
-        
-        # Default opacity (in log space for PLY)
-        opacity = np.full(n, np.log(self.config.opacity_default / (1 - self.config.opacity_default)))
-        
-        return GaussianSplat(
-            positions=positions,
-            scales=scales,
-            rotations=rotations,
-            colors=colors,
-            opacity=opacity
-        )
-
-    def _initialize_from_faces(self, mesh: trimesh.Trimesh) -> GaussianSplat:
-        """Initialize gaussians by sampling points on faces."""
-        # Sample points on mesh surface
-        points, face_indices = trimesh.sample.sample_surface(
-            mesh,
-            count=self.config.target_gaussians or len(mesh.faces) * self.config.samples_per_face
-        )
-
-        n = len(points)
-        positions = points
-
-        # Extract colors at sampled points
-        colors = self._extract_face_colors(mesh, face_indices)
-
-        # Estimate scales from local face size
-        scales = self._estimate_scales_from_faces(mesh, face_indices)
-
-        # Compute rotations from face normals
-        face_normals = mesh.face_normals[face_indices]
-        rotations = self._compute_rotations_from_normals(face_normals)
-
-        # Default opacity
-        opacity = np.full(n, np.log(self.config.opacity_default / (1 - self.config.opacity_default)))
-
-        return GaussianSplat(
-            positions=positions,
-            scales=scales,
-            rotations=rotations,
-            colors=colors,
-            opacity=opacity
-        )
-
-    def _initialize_hybrid(self, mesh: trimesh.Trimesh) -> GaussianSplat:
-        """Hybrid initialization: combine vertex and face sampling."""
-        # Get vertex-based gaussians
-        vertex_gaussians = self._initialize_from_vertices(mesh)
-
-        # Get face-based gaussians (fewer samples)
-        face_config = ConversionConfig(
-            samples_per_face=max(1, self.config.samples_per_face // 2),
-            target_gaussians=len(mesh.vertices) // 2
-        )
-        temp_converter = MeshToGaussianConverter(face_config)
-        face_gaussians = temp_converter._initialize_from_faces(mesh)
-
-        # Combine
-        return GaussianSplat(
-            positions=np.vstack([vertex_gaussians.positions, face_gaussians.positions]),
-            scales=np.vstack([vertex_gaussians.scales, face_gaussians.scales]),
-            rotations=np.vstack([vertex_gaussians.rotations, face_gaussians.rotations]),
-            colors=np.vstack([vertex_gaussians.colors, face_gaussians.colors]),
-            opacity=np.hstack([vertex_gaussians.opacity, face_gaussians.opacity])
-        )
-
-    def _extract_vertex_colors(self, mesh: trimesh.Trimesh) -> np.ndarray:
-        """Extract colors from mesh vertices."""
-        n = len(mesh.vertices)
-
-        if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
-            colors = mesh.visual.vertex_colors[:, :3] / 255.0
-        else:
-            # Default gray
-            colors = np.full((n, 3), 0.5)
-
-        return colors.astype(np.float32)
-
-    def _extract_face_colors(self, mesh: trimesh.Trimesh, face_indices: np.ndarray) -> np.ndarray:
-        """Extract colors for sampled face points."""
-        n = len(face_indices)
-
-        if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
-            # Average vertex colors of the face
-            face_vertex_indices = mesh.faces[face_indices]
-            vertex_colors = mesh.visual.vertex_colors[:, :3] / 255.0
-            colors = vertex_colors[face_vertex_indices].mean(axis=1)
-        else:
-            # Default gray
-            colors = np.full((n, 3), 0.5)
-
-        return colors.astype(np.float32)
-
-    def _estimate_scales_from_vertices(self, mesh: trimesh.Trimesh) -> np.ndarray:
-        """Estimate gaussian scales from local vertex spacing."""
-        from scipy.spatial import cKDTree
-
-        tree = cKDTree(mesh.vertices)
-        # Find 4 nearest neighbors (including self)
-        distances, _ = tree.query(mesh.vertices, k=4)
-
-        # Use mean distance to neighbors as scale estimate
-        mean_distances = distances[:, 1:].mean(axis=1)
-
-        # Isotropic scales (same in all directions), in log space
-        scales = np.log(mean_distances[:, None] * self.config.scale_multiplier + 1e-8)
-        scales = np.tile(scales, (1, 3))
-
-        return scales.astype(np.float32)
-
-    def _estimate_scales_from_faces(self, mesh: trimesh.Trimesh, face_indices: np.ndarray) -> np.ndarray:
-        """Estimate gaussian scales from face areas."""
-        # Get face areas
-        face_areas = mesh.area_faces[face_indices]
-
-        # Scale proportional to sqrt(area)
-        scale_values = np.sqrt(face_areas) * self.config.scale_multiplier
-
-        # Isotropic scales in log space
-        scales = np.log(scale_values[:, None] + 1e-8)
-        scales = np.tile(scales, (1, 3))
-
-        return scales.astype(np.float32)
-
-    def _compute_rotations_from_normals(self, normals: np.ndarray) -> np.ndarray:
-        """Compute quaternion rotations to align gaussians with normals."""
-        n = len(normals)
-
-        # Normalize normals
-        normals = normals / (np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8)
-
-        # Compute rotation from [0, 0, 1] to normal
-        # Using quaternion from two vectors
-        z_axis = np.array([0, 0, 1])
-
-        quaternions = np.zeros((n, 4))
-
-        for i in range(n):
-            quaternions[i] = self._quaternion_from_vectors(z_axis, normals[i])
-
-        return quaternions.astype(np.float32)
-
-    def _quaternion_from_vectors(self, v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
-        """Compute quaternion rotation from v1 to v2."""
-        # Normalize
-        v1 = v1 / (np.linalg.norm(v1) + 1e-8)
-        v2 = v2 / (np.linalg.norm(v2) + 1e-8)
-
-        # Cross product and dot product
-        cross = np.cross(v1, v2)
-        dot = np.dot(v1, v2)
-
-        # Handle parallel vectors
-        if dot > 0.9999:
-            return np.array([1, 0, 0, 0])  # Identity quaternion
-        elif dot < -0.9999:
-            # 180 degree rotation around arbitrary perpendicular axis
-            perp = np.array([1, 0, 0]) if abs(v1[0]) < 0.9 else np.array([0, 1, 0])
-            axis = np.cross(v1, perp)
-            axis = axis / np.linalg.norm(axis)
-            return np.array([0, axis[0], axis[1], axis[2]])
-
-        # Standard case
-        w = 1 + dot
-        q = np.array([w, cross[0], cross[1], cross[2]])
-        q = q / np.linalg.norm(q)
-
-        return q
-
-    def _optimize(self, gaussians: GaussianSplat, mesh: trimesh.Trimesh) -> GaussianSplat:
-        """Quick optimization of gaussian parameters (requires PyTorch)."""
-        # TODO: Implement optional PyTorch-based optimization
-        print("Warning: Optimization not yet implemented, returning unoptimized gaussians")
+        print(f"Created {len(gaussians)} initial gaussians")
         return gaussians
+    
+    def _normal_to_quaternion(self, normal: np.ndarray) -> np.ndarray:
+        """Convert normal vector to quaternion rotation"""
+        # Simplified: Create rotation that aligns (0,0,1) with normal
+        z = np.array([0, 0, 1])
+        normal = normal / (np.linalg.norm(normal) + 1e-8)
+        
+        if np.allclose(normal, z):
+            return np.array([1, 0, 0, 0])  # Identity quaternion
+        elif np.allclose(normal, -z):
+            return np.array([0, 1, 0, 0])  # 180 degree rotation around X
+        
+        axis = np.cross(z, normal)
+        axis = axis / (np.linalg.norm(axis) + 1e-8)
+        angle = np.arccos(np.clip(np.dot(z, normal), -1, 1))
+        
+        # Axis-angle to quaternion
+        s = np.sin(angle / 2)
+        quat = np.array([
+            np.cos(angle / 2),
+            axis[0] * s,
+            axis[1] * s,
+            axis[2] * s
+        ])
+        return quat / (np.linalg.norm(quat) + 1e-8)
+    
+    def optimize_gaussians(self, gaussians: List[_SingleGaussian],
+                          iterations: int = 100) -> List[_SingleGaussian]:
+        """
+        Simple optimization pass to improve gaussian placement
+        This is a placeholder - in production you'd render and compare
+        """
+        if not TORCH_AVAILABLE:
+            print("PyTorch not available, skipping optimization")
+            return gaussians
+            
+        if not torch.cuda.is_available():
+            print("CUDA not available, skipping optimization")
+            return gaussians
+            
+        print(f"Optimizing {len(gaussians)} gaussians for {iterations} iterations...")
+        
+        # Convert to tensors
+        positions = torch.tensor(
+            np.array([g.position for g in gaussians]), 
+            dtype=torch.float32, 
+            device=self.device,
+            requires_grad=True
+        )
+        
+        scales = torch.tensor(
+            np.array([g.scales for g in gaussians]),
+            dtype=torch.float32,
+            device=self.device, 
+            requires_grad=True
+        )
+        
+        opacities = torch.tensor(
+            np.array([g.opacity for g in gaussians]),
+            dtype=torch.float32,
+            device=self.device,
+            requires_grad=True
+        )
+        
+        optimizer = torch.optim.Adam([positions, scales, opacities], lr=0.001)
+        
+        for i in range(iterations):
+            optimizer.zero_grad()
+            
+            # Simple regularization losses (no rendering)
+            # Encourage reasonable scales
+            scale_loss = torch.mean(torch.abs(scales - 0.01))
+            
+            # Encourage opacity near 0.9
+            opacity_loss = torch.mean((opacities - 0.9) ** 2)
+            
+            # Prevent gaussians from drifting too far
+            position_loss = torch.mean(positions ** 2)
+            
+            # Total loss
+            loss = scale_loss + opacity_loss * 0.1 + position_loss * 0.01
+            
+            loss.backward()
+            optimizer.step()
+            
+            # Clamp values
+            with torch.no_grad():
+                scales.clamp_(0.001, 0.5)
+                opacities.clamp_(0.01, 0.99)
+            
+            if i % 20 == 0:
+                print(f"  Iteration {i}: loss = {loss.item():.4f}")
+        
+        # Convert back to gaussians
+        optimized = []
+        pos_np = positions.detach().cpu().numpy()
+        scale_np = scales.detach().cpu().numpy()
+        opacity_np = opacities.detach().cpu().numpy()
+        
+        for i, g in enumerate(gaussians):
+            opt_g = _SingleGaussian(
+                position=pos_np[i],
+                scales=scale_np[i],
+                rotation=g.rotation,
+                opacity=float(opacity_np[i]),
+                sh_dc=g.sh_dc,
+                sh_rest=g.sh_rest
+            )
+            optimized.append(opt_g)
+        
+        return optimized
+    
+    def generate_lod(self, gaussians: List[_SingleGaussian],
+                    target_count: int,
+                    strategy: str = 'opacity') -> List[_SingleGaussian]:
+        """
+        Generate LOD by pruning gaussians
+        Strategies:
+        - 'opacity': Keep most opaque gaussians
+        - 'spatial': Spatial subsampling
+        - 'size': Keep larger gaussians
+        """
+        if len(gaussians) <= target_count:
+            return gaussians
+        
+        if strategy == 'opacity':
+            # Sort by opacity and keep top N
+            sorted_gaussians = sorted(gaussians, 
+                                    key=lambda g: g.opacity, 
+                                    reverse=True)
+            return sorted_gaussians[:target_count]
+        
+        elif strategy == 'spatial':
+            # Simple spatial subsampling using clustering
+            positions = np.array([g.position for g in gaussians])
+            
+            # K-means style sampling
+            indices = []
+            remaining = list(range(len(gaussians)))
+            
+            # Start with random gaussian
+            idx = np.random.choice(remaining)
+            indices.append(idx)
+            remaining.remove(idx)
+            
+            # Greedily select furthest gaussians
+            while len(indices) < target_count and remaining:
+                selected_pos = positions[indices]
+                max_dist = -1
+                best_idx = None
+                
+                for idx in remaining[:1000]:  # Limit search for speed
+                    dists = np.linalg.norm(positions[idx] - selected_pos, axis=1)
+                    min_dist = np.min(dists)
+                    if min_dist > max_dist:
+                        max_dist = min_dist
+                        best_idx = idx
+                
+                if best_idx is not None:
+                    indices.append(best_idx)
+                    remaining.remove(best_idx)
+            
+            return [gaussians[i] for i in indices]
+        
+        elif strategy == 'size':
+            # Keep larger gaussians
+            sorted_gaussians = sorted(gaussians,
+                                    key=lambda g: np.prod(g.scales),
+                                    reverse=True)
+            return sorted_gaussians[:target_count]
+        
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+    
+    def save_ply(self, gaussians: List[_SingleGaussian],
+                 output_path: str):
+        """Save gaussians to PLY format compatible with gaussian splatting viewers"""
+        
+        # Prepare data arrays
+        positions = np.array([g.position for g in gaussians])
+        scales = np.array([g.scales for g in gaussians])
+        rotations = np.array([g.rotation for g in gaussians])
+        opacities = np.array([g.opacity for g in gaussians])
+        sh_dc = np.array([g.sh_dc for g in gaussians])
+        
+        # Convert scales to log scale (expected by viewers)
+        log_scales = np.log(scales + 1e-8)
+        
+        # Prepare vertex data
+        vertex_count = len(gaussians)
+        
+        with open(output_path, 'wb') as f:
+            # PLY header
+            f.write(b'ply\n')
+            f.write(b'format binary_little_endian 1.0\n')
+            f.write(f'element vertex {vertex_count}\n'.encode())
+            
+            # Position
+            f.write(b'property float x\n')
+            f.write(b'property float y\n')
+            f.write(b'property float z\n')
+            
+            # Normals (unused but expected)
+            f.write(b'property float nx\n')
+            f.write(b'property float ny\n')
+            f.write(b'property float nz\n')
+            
+            # Spherical harmonics DC
+            f.write(b'property float f_dc_0\n')
+            f.write(b'property float f_dc_1\n')
+            f.write(b'property float f_dc_2\n')
+            
+            # Opacity
+            f.write(b'property float opacity\n')
+            
+            # Scales
+            f.write(b'property float scale_0\n')
+            f.write(b'property float scale_1\n')
+            f.write(b'property float scale_2\n')
+            
+            # Rotation
+            f.write(b'property float rot_0\n')
+            f.write(b'property float rot_1\n')
+            f.write(b'property float rot_2\n')
+            f.write(b'property float rot_3\n')
+            
+            f.write(b'end_header\n')
+            
+            # Write vertex data
+            for i in range(vertex_count):
+                # Position
+                f.write(struct.pack('<fff', *positions[i]))
+                
+                # Normal (unused)
+                f.write(struct.pack('<fff', 0, 0, 0))
+                
+                # SH DC
+                f.write(struct.pack('<fff', *sh_dc[i]))
+                
+                # Opacity 
+                f.write(struct.pack('<f', opacities[i]))
+                
+                # Scale
+                f.write(struct.pack('<fff', *log_scales[i]))
+                
+                # Rotation
+                f.write(struct.pack('<ffff', *rotations[i]))
+        
+        print(f"Saved {vertex_count} gaussians to {output_path}")
 
-    def generate_lods(self, gaussians: GaussianSplat, target_counts: List[int]) -> List[GaussianSplat]:
-        """Generate multiple LOD levels."""
-        lod_gen = LODGenerator(strategy='importance')
-        return lod_gen.generate_lods(gaussians, target_counts)
+def main():
+    parser = argparse.ArgumentParser(description='Simple mesh to gaussian converter')
+    parser.add_argument('input', help='Input mesh file (OBJ/GLB)')
+    parser.add_argument('output', help='Output PLY file')
+    parser.add_argument('--strategy', default='hybrid',
+                       choices=['vertex', 'face', 'hybrid'],
+                       help='Gaussian initialization strategy')
+    parser.add_argument('--optimize', type=int, default=100,
+                       help='Optimization iterations (0 to disable)')
+    parser.add_argument('--lod', type=int, nargs='*',
+                       default=[5000, 25000, 100000],
+                       help='LOD levels to generate')
+    
+    args = parser.parse_args()
+    
+    # Initialize converter
+    converter = MeshToGaussianConverter()
+    
+    # Load mesh
+    mesh = converter.load_mesh(args.input)
+    
+    # Convert to gaussians
+    gaussians = converter.mesh_to_gaussians(mesh, strategy=args.strategy)
+    
+    # Optimize if requested
+    if args.optimize > 0 and TORCH_AVAILABLE and torch.cuda.is_available():
+        gaussians = converter.optimize_gaussians(gaussians, iterations=args.optimize)
+    elif args.optimize > 0:
+        print("Optimization requested but PyTorch/CUDA not available")
+    
+    # Save full resolution
+    base_name = Path(args.output).stem
+    output_dir = Path(args.output).parent
+    
+    converter.save_ply(gaussians, args.output)
+    
+    # Generate LODs
+    for lod_count in args.lod:
+        if lod_count < len(gaussians):
+            lod_gaussians = converter.generate_lod(gaussians, lod_count, strategy='opacity')
+            lod_path = output_dir / f"{base_name}_lod_{lod_count}.ply"
+            converter.save_ply(lod_gaussians, str(lod_path))
 
+if __name__ == '__main__':
+    main()
