@@ -10,7 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
 from mesh_to_gaussian import MeshToGaussianConverter
-from ply_io import save_ply
 from lod_generator import LODGenerator
 
 

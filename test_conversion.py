@@ -11,8 +11,8 @@ import trimesh
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
-from src.ply_io import save_ply
+from src.mesh_to_gaussian import MeshToGaussianConverter
+from src.lod_generator import LODGenerator
 
 def main():
     print("=" * 60)
@@ -35,53 +35,51 @@ def main():
     
     # Test 1: Vertex strategy
     print("3. Testing VERTEX strategy...")
-    config = ConversionConfig(initialization_strategy='vertex')
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert(mesh_path)
-    print(f"   ✓ Generated {gaussians.count} gaussians")
-    
+    converter = MeshToGaussianConverter()
+    mesh = converter.load_mesh(str(mesh_path))
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='vertex')
+    print(f"   ✓ Generated {len(gaussians)} gaussians")
+
     output_path = Path("test_output_vertex.ply")
-    save_ply(gaussians, output_path)
+    converter.save_ply(gaussians, str(output_path))
     print(f"   ✓ Saved to {output_path} ({output_path.stat().st_size} bytes)")
     print()
-    
+
     # Test 2: Face strategy
     print("4. Testing FACE strategy...")
-    config = ConversionConfig(
-        initialization_strategy='face',
-        samples_per_face=10
-    )
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert(mesh_path)
-    print(f"   ✓ Generated {gaussians.count} gaussians")
-    
+    converter = MeshToGaussianConverter()
+    mesh = converter.load_mesh(str(mesh_path))
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='face', samples_per_face=10)
+    print(f"   ✓ Generated {len(gaussians)} gaussians")
+
     output_path = Path("test_output_face.ply")
-    save_ply(gaussians, output_path)
+    converter.save_ply(gaussians, str(output_path))
     print(f"   ✓ Saved to {output_path} ({output_path.stat().st_size} bytes)")
     print()
-    
+
     # Test 3: Hybrid strategy
     print("5. Testing HYBRID strategy...")
-    config = ConversionConfig(initialization_strategy='hybrid')
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert(mesh_path)
-    print(f"   ✓ Generated {gaussians.count} gaussians")
-    
+    converter = MeshToGaussianConverter()
+    mesh = converter.load_mesh(str(mesh_path))
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
+    print(f"   ✓ Generated {len(gaussians)} gaussians")
+
     output_path = Path("test_output_hybrid.ply")
-    save_ply(gaussians, output_path)
+    converter.save_ply(gaussians, str(output_path))
     print(f"   ✓ Saved to {output_path} ({output_path.stat().st_size} bytes)")
     print()
     
     # Test 4: LOD generation
     print("6. Testing LOD generation...")
+    lod_gen = LODGenerator(strategy='importance')
     lod_counts = [10, 25, 50]
-    lods = converter.generate_lods(gaussians, lod_counts)
-    print(f"   ✓ Generated {len(lods)} LOD levels")
-    
-    for count, lod in zip(sorted(lod_counts), lods):
+    print(f"   ✓ Generating {len(lod_counts)} LOD levels")
+
+    for count in sorted(lod_counts):
+        lod = lod_gen.generate_lod(gaussians, count)
         lod_path = Path(f"test_output_lod{count}.ply")
-        save_ply(lod, lod_path)
-        print(f"   ✓ LOD {count}: {lod.count} gaussians -> {lod_path} ({lod_path.stat().st_size} bytes)")
+        converter.save_ply(lod, str(lod_path))
+        print(f"   ✓ LOD {count}: {len(lod)} gaussians -> {lod_path} ({lod_path.stat().st_size} bytes)")
     print()
     
     # Summary

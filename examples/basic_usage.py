@@ -8,25 +8,26 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
-from ply_io import save_ply
+from mesh_to_gaussian import MeshToGaussianConverter
+from lod_generator import LODGenerator
 
 
 def example_basic_conversion():
     """Basic mesh to gaussian conversion."""
     print("Example 1: Basic Conversion")
     print("-" * 50)
-    
+
     # Create converter with default settings
     converter = MeshToGaussianConverter()
-    
-    # Convert mesh
-    gaussians = converter.convert('input.obj')
-    
+
+    # Load and convert mesh
+    mesh = converter.load_mesh('input.obj')
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='adaptive')
+
     # Save result
-    save_ply(gaussians, 'output.ply')
-    
-    print(f"Converted to {gaussians.count} gaussians")
+    converter.save_ply(gaussians, 'output.ply')
+
+    print(f"Converted to {len(gaussians)} gaussians")
     print()
 
 
@@ -34,20 +35,16 @@ def example_custom_config():
     """Conversion with custom configuration."""
     print("Example 2: Custom Configuration")
     print("-" * 50)
-    
-    # Create custom config
-    config = ConversionConfig(
-        initialization_strategy='hybrid',
-        target_gaussians=50000,
-        scale_multiplier=1.2,
-        opacity_default=0.95
-    )
-    
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert('input.glb')
-    save_ply(gaussians, 'output_custom.ply')
-    
-    print(f"Converted with hybrid strategy: {gaussians.count} gaussians")
+
+    # Create converter
+    converter = MeshToGaussianConverter(device='cpu')
+
+    # Load and convert with hybrid strategy
+    mesh = converter.load_mesh('input.glb')
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid', samples_per_face=15)
+    converter.save_ply(gaussians, 'output_custom.ply')
+
+    print(f"Converted with hybrid strategy: {len(gaussians)} gaussians")
     print()
 
 
@@ -55,19 +52,21 @@ def example_lod_generation():
     """Generate multiple LOD levels."""
     print("Example 3: LOD Generation")
     print("-" * 50)
-    
+
     converter = MeshToGaussianConverter()
-    gaussians = converter.convert('input.obj')
-    
+    mesh = converter.load_mesh('input.obj')
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
+
     # Generate LODs
+    lod_gen = LODGenerator(strategy='importance')
     lod_counts = [5000, 25000, 100000]
-    lods = converter.generate_lods(gaussians, lod_counts)
-    
+
     # Save each LOD
-    for count, lod in zip(lod_counts, lods):
-        save_ply(lod, f'output_lod{count}.ply')
-        print(f"LOD {count}: {lod.count} gaussians")
-    
+    for count in lod_counts:
+        lod = lod_gen.generate_lod(gaussians, count)
+        converter.save_ply(lod, f'output_lod{count}.ply')
+        print(f"LOD {count}: {len(lod)} gaussians")
+
     print()
 
 
@@ -75,17 +74,13 @@ def example_vertex_strategy():
     """Use vertex-based initialization for low-poly meshes."""
     print("Example 4: Vertex Strategy (Low-Poly)")
     print("-" * 50)
-    
-    config = ConversionConfig(
-        initialization_strategy='vertex',
-        scale_multiplier=0.8
-    )
-    
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert('lowpoly.obj')
-    save_ply(gaussians, 'output_vertex.ply')
-    
-    print(f"Vertex-based conversion: {gaussians.count} gaussians")
+
+    converter = MeshToGaussianConverter()
+    mesh = converter.load_mesh('lowpoly.obj')
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='vertex')
+    converter.save_ply(gaussians, 'output_vertex.ply')
+
+    print(f"Vertex-based conversion: {len(gaussians)} gaussians")
     print()
 
 
@@ -93,18 +88,13 @@ def example_face_strategy():
     """Use face-based initialization for high-poly meshes."""
     print("Example 5: Face Strategy (High-Poly)")
     print("-" * 50)
-    
-    config = ConversionConfig(
-        initialization_strategy='face',
-        samples_per_face=15,
-        target_gaussians=100000
-    )
-    
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert('highpoly.glb')
-    save_ply(gaussians, 'output_face.ply')
-    
-    print(f"Face-based conversion: {gaussians.count} gaussians")
+
+    converter = MeshToGaussianConverter()
+    mesh = converter.load_mesh('highpoly.glb')
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='face', samples_per_face=15)
+    converter.save_ply(gaussians, 'output_face.ply')
+
+    print(f"Face-based conversion: {len(gaussians)} gaussians")
     print()
 
 
@@ -112,19 +102,16 @@ def example_with_optimization():
     """Conversion with GPU optimization (requires PyTorch)."""
     print("Example 6: With GPU Optimization")
     print("-" * 50)
-    
-    config = ConversionConfig(
-        initialization_strategy='adaptive',
-        optimize=True,
-        optimization_iterations=100,
-        device='cuda'  # Use 'cpu' if no GPU
-    )
-    
-    converter = MeshToGaussianConverter(config)
-    gaussians = converter.convert('input.obj')
-    save_ply(gaussians, 'output_optimized.ply')
-    
-    print(f"Optimized conversion: {gaussians.count} gaussians")
+
+    converter = MeshToGaussianConverter(device='cuda')  # Use 'cpu' if no GPU
+    mesh = converter.load_mesh('input.obj')
+    gaussians = converter.mesh_to_gaussians(mesh, strategy='adaptive')
+
+    # Optimize (if PyTorch available)
+    optimized = converter.optimize_gaussians(gaussians, iterations=100)
+    converter.save_ply(optimized, 'output_optimized.ply')
+
+    print(f"Optimized conversion: {len(optimized)} gaussians")
     print()
 
 

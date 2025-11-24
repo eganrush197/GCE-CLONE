@@ -76,9 +76,8 @@ Converts traditional 3D mesh files (OBJ/GLB) into Gaussian Splat representations
 GCE CLONE/
 ├── src/                          # Core library
 │   ├── mesh_to_gaussian.py      # Main converter (555 lines)
-│   ├── gaussian_splat.py        # Data structures
+│   ├── gaussian_splat.py        # Data structures (collection-based)
 │   ├── lod_generator.py         # LOD generation
-│   ├── ply_io.py               # PLY file I/O
 │   └── __init__.py             # Package exports
 │
 ├── convert.py                   # Simple wrapper script
@@ -135,14 +134,6 @@ GCE CLONE/
 - Importance-based gaussian selection
 - Multiple LOD level creation
 - Gaussian subset extraction
-
-#### `src/ply_io.py`
-**Purpose:** PLY file I/O  
-**Key Functions:** `save_ply()`, `load_ply()`  
-**Responsibilities:**
-- Binary PLY format writing
-- Viewer-compatible format compliance
-- Efficient file I/O
 
 ---
 
@@ -273,7 +264,7 @@ save_ply(gaussians: List[GaussianSplat], output_path: str) -> None
 **Purpose:** Save gaussians to binary PLY file
 
 **Parameters:**
-- `gaussians` (List[GaussianSplat]): Gaussians to save
+- `gaussians` (List[_SingleGaussian]): List of gaussians to save
 - `output_path` (str): Output file path (.ply extension)
 
 **File Format:** Binary PLY with properties:
@@ -295,15 +286,15 @@ converter.save_ply(gaussians, "output.ply")
 
 ---
 
-### GaussianSplat (Data Class)
+### _SingleGaussian (Internal Data Class)
 
 **Location:** `src/mesh_to_gaussian.py`
 
 ```python
 @dataclass
-class GaussianSplat:
+class _SingleGaussian:
     position: np.ndarray   # [x, y, z]
-    scale: np.ndarray      # [sx, sy, sz]
+    scales: np.ndarray     # [sx, sy, sz]
     rotation: np.ndarray   # [qw, qx, qy, qz] quaternion
     opacity: float         # 0.0 to 1.0
     sh_dc: np.ndarray      # [r, g, b] spherical harmonics DC term
@@ -311,9 +302,13 @@ class GaussianSplat:
 ```
 
 **Properties:**
+- Internal use only (not exported from package)
 - All numpy arrays are float32
 - Colors in `sh_dc` are centered around 0 (not 0-1 range)
 - Rotation is normalized quaternion
+- Used during conversion and LOD generation
+
+**Note:** There is also a `GaussianSplat` class in `src/gaussian_splat.py` for collection-based operations, but it's not currently used by the converter.
 
 ---
 
@@ -325,23 +320,23 @@ class GaussianSplat:
 
 ```python
 generate_lod(
-    gaussians: List[GaussianSplat],
+    gaussians: List[_SingleGaussian],
     target_count: int,
-    strategy: str = 'importance'
-) -> List[GaussianSplat]
+    strategy: str = None
+) -> List[_SingleGaussian]
 ```
 
 **Purpose:** Generate Level of Detail by selecting subset of gaussians
 
 **Parameters:**
-- `gaussians` (List[GaussianSplat]): Input gaussians
+- `gaussians` (List[_SingleGaussian]): Input gaussians
 - `target_count` (int): Desired number of gaussians in LOD
-- `strategy` (str): Selection strategy
-  - `'importance'`: Keep largest/most opaque gaussians
-  - `'random'`: Random sampling
-  - `'uniform'`: Evenly spaced sampling
+- `strategy` (str, optional): Override pruning strategy
+  - `'importance'`: Keep largest/most opaque gaussians (default)
+  - `'opacity'`: Keep most opaque gaussians
+  - `'spatial'`: Voxel-based spatial subsampling
 
-**Returns:** `List[GaussianSplat]` with `target_count` gaussians
+**Returns:** `List[_SingleGaussian]` with `target_count` gaussians (or all if target > input count)
 
 **Example:**
 ```python
@@ -1010,10 +1005,9 @@ python -m pytest tests/
 ### Code Structure
 
 **Core Modules:**
-- `src/mesh_to_gaussian.py` - Main converter logic
-- `src/gaussian_splat.py` - Data structures
+- `src/mesh_to_gaussian.py` - Main converter logic (includes PLY export)
+- `src/gaussian_splat.py` - Data structures (collection-based, not currently used)
 - `src/lod_generator.py` - LOD generation
-- `src/ply_io.py` - File I/O
 
 **Entry Points:**
 - `convert.py` - Simple wrapper

@@ -77,22 +77,27 @@ python mesh2gaussian input.obj output.ply --optimize --device cuda
 ### Python API
 
 ```python
-from mesh_to_gaussian import MeshToGaussianConverter, ConversionConfig
+from src.mesh_to_gaussian import MeshToGaussianConverter
+from src.lod_generator import LODGenerator
 
 # Create converter
-config = ConversionConfig(
-    initialization_strategy='adaptive',
-    target_gaussians=50000,
-    optimize=True
-)
-converter = MeshToGaussianConverter(config)
+converter = MeshToGaussianConverter(device='cpu')
 
-# Convert mesh
-gaussians = converter.convert('input.obj')
+# Load and convert mesh
+mesh = converter.load_mesh('input.obj')
+gaussians = converter.mesh_to_gaussians(mesh, strategy='adaptive', samples_per_face=10)
 converter.save_ply(gaussians, 'output.ply')
 
 # Generate LODs
-lods = converter.generate_lods(gaussians, [5000, 25000, 100000])
+lod_gen = LODGenerator(strategy='importance')
+lod_5k = lod_gen.generate_lod(gaussians, 5000)
+lod_25k = lod_gen.generate_lod(gaussians, 25000)
+lod_100k = lod_gen.generate_lod(gaussians, 100000)
+
+# Save LODs
+converter.save_ply(lod_5k, 'output_lod5k.ply')
+converter.save_ply(lod_25k, 'output_lod25k.ply')
+converter.save_ply(lod_100k, 'output_lod100k.ply')
 ```
 
 ## Initialization Strategies

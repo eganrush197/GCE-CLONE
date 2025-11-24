@@ -50,18 +50,20 @@ python mesh2gaussian input.obj output.ply --optimize --device cuda
 
 ```python
 from src.mesh_to_gaussian import MeshToGaussianConverter
-from src.ply_io import save_ply
 
 # Create converter
 converter = MeshToGaussianConverter()
 
-# Convert mesh
-gaussians = converter.convert('input.obj')
+# Load mesh
+mesh = converter.load_mesh('input.obj')
+
+# Convert to gaussians
+gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
 
 # Save result
-save_ply(gaussians, 'output.ply')
+converter.save_ply(gaussians, 'output.ply')
 
-print(f"✅ Created {gaussians.count} gaussians")
+print(f"✅ Created {len(gaussians)} gaussians")
 ```
 
 ## Common Workflows
