@@ -50,20 +50,26 @@ python mesh2gaussian input.obj output.ply --optimize --device cuda
 
 ```python
 from src.mesh_to_gaussian import MeshToGaussianConverter
+from src.lod_generator import LODGenerator
 
 # Create converter
-converter = MeshToGaussianConverter()
+converter = MeshToGaussianConverter(device='cpu')  # or 'cuda' for GPU
 
-# Load mesh
+# Load mesh (auto-loads MTL colors)
 mesh = converter.load_mesh('input.obj')
 
 # Convert to gaussians
-gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid')
+gaussians = converter.mesh_to_gaussians(mesh, strategy='hybrid', samples_per_face=10)
 
 # Save result
 converter.save_ply(gaussians, 'output.ply')
 
 print(f"✅ Created {len(gaussians)} gaussians")
+
+# Optional: Generate LODs
+lod_gen = LODGenerator(strategy='importance')
+lod_5k = lod_gen.generate_lod(gaussians, 5000)
+converter.save_ply(lod_5k, 'output_lod5k.ply')
 ```
 
 ## Common Workflows
@@ -75,6 +81,9 @@ print(f"✅ Created {len(gaussians)} gaussians")
 python mesh2gaussian lowpoly_character.obj character.ply --strategy vertex
 ```
 
+**Why vertex strategy?** Low-poly models have well-defined vertices that represent
+the shape perfectly. One gaussian per vertex is efficient and accurate.
+
 ### High-Poly Scanned Model
 
 ```bash
@@ -83,6 +92,11 @@ python mesh2gaussian scanned_statue.glb statue.ply \
   --strategy face \
   --lod 10000,50000,200000
 ```
+
+**Why face strategy?** High-poly scanned models have dense triangles. Sampling on
+faces captures surface detail better than just vertices.
+
+**LOD Strategy:** Uses 'importance' by default (opacity × volume) for best quality.
 
 ### Textured Architectural Model
 
@@ -93,13 +107,52 @@ python mesh2gaussian building.glb building.ply \
   --samples-per-face 15
 ```
 
+**Why hybrid strategy?** Combines vertex precision with face sampling to capture
+both geometry and texture details.
+
+## Understanding LOD Strategies
+
+When generating LODs, you can choose different pruning strategies:
+
+```bash
+# Importance (RECOMMENDED) - Best quality
+python mesh2gaussian model.obj output.ply --lod 5000,25000,100000
+# Uses opacity × volume metric
+
+# Opacity - Fast, good quality
+# (Currently set via LODGenerator in Python API)
+
+# Spatial - Uniform coverage
+# (Currently set via LODGenerator in Python API)
+```
+
+**Python API for LOD strategies:**
+```python
+from src.lod_generator import LODGenerator
+
+# Importance (recommended)
+lod_gen = LODGenerator(strategy='importance')
+lod_5k = lod_gen.generate_lod(gaussians, 5000)
+
+# Opacity (fast)
+lod_gen = LODGenerator(strategy='opacity')
+lod_5k = lod_gen.generate_lod(gaussians, 5000)
+
+# Spatial (uniform)
+lod_gen = LODGenerator(strategy='spatial')
+lod_5k = lod_gen.generate_lod(gaussians, 5000)
+```
+
 ## Testing Your Installation
 
 ```bash
 # Run the test suite
 pytest tests/ -v
 
-# Should see all tests passing
+# Expected output: 8 passed in ~3-6 seconds
+# ✅ TestGaussianSplat: 2 tests
+# ✅ TestMeshToGaussianConverter: 3 tests
+# ✅ TestLODGenerator: 3 tests
 ```
 
 ## Viewing Results

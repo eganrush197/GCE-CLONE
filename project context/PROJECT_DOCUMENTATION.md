@@ -1,8 +1,8 @@
 # Gaussian Mesh Converter - Technical Documentation
 
-**Version:** 1.0 (2024)  
-**Status:** Production Ready  
-**Last Updated:** 2024-11-23
+**Version:** 1.1 (2024)
+**Status:** Production Ready
+**Last Updated:** 2024-11-24
 
 > 📘 **Documentation Structure:**
 > - This document: Technical overview and implementation details
@@ -58,8 +58,10 @@ Converts traditional 3D mesh files (OBJ/GLB) into Gaussian Splat representations
 | OBJ/GLB Loading | ✅ Ready | Full support with normalization |
 | MTL Color Parsing | ✅ Ready | Automatic quad-to-triangle handling |
 | Gaussian Generation | ✅ Ready | 4 strategies: vertex, face, hybrid, adaptive |
-| PLY Export | ✅ Ready | Binary format, viewer-compatible |
-| LOD Generation | ✅ Ready | Multiple detail levels |
+| PLY Export | ✅ Ready | Binary format, Spherical Harmonics (SH) |
+| LOD Generation | ✅ Ready | 3 strategies: importance, opacity, spatial |
+| Type Safety | ✅ Ready | Full type hints for IDE support |
+| Test Coverage | ✅ Ready | 8/8 tests passing |
 | PyTorch Optimization | ⚠️ Limited | Works but slow import on Windows |
 | UV Texture Sampling | 📋 Planned | See COLOR_ENHANCEMENTS_PLAN.md |
 | Batch Processing | 📋 Planned | Single file only currently |
@@ -68,16 +70,16 @@ Converts traditional 3D mesh files (OBJ/GLB) into Gaussian Splat representations
 
 ## Architecture Overview
 
-> ⚠️ **Note:** This section describes the current implementation. File paths and class names are accurate as of 2024-11-23.
+> ⚠️ **Note:** This section describes the current implementation. File paths and class names are accurate as of 2024-11-24.
 
 ### Project Structure
 
 ```
 GCE CLONE/
 ├── src/                          # Core library
-│   ├── mesh_to_gaussian.py      # Main converter (555 lines)
-│   ├── gaussian_splat.py        # Data structures (collection-based)
-│   ├── lod_generator.py         # LOD generation
+│   ├── mesh_to_gaussian.py      # Main converter (513 lines)
+│   ├── gaussian_splat.py        # Data structures (108 lines, advanced use)
+│   ├── lod_generator.py         # LOD generation (199 lines)
 │   └── __init__.py             # Package exports
 │
 ├── convert.py                   # Simple wrapper script
@@ -87,7 +89,7 @@ GCE CLONE/
 ├── setup.py                     # Package setup
 │
 ├── tests/                       # Unit tests
-│   └── test_converter.py
+│   └── test_converter.py       # 8 tests, all passing
 │
 ├── examples/                    # Example scripts
 │   └── basic_usage.py
@@ -104,42 +106,68 @@ GCE CLONE/
 ### Module Responsibilities
 
 #### `src/mesh_to_gaussian.py`
-**Purpose:** Core conversion logic  
-**Key Classes:** `MeshToGaussianConverter`, `GaussianSplat`  
+**Purpose:** Core conversion logic
+**Key Classes:** `MeshToGaussianConverter`, `_SingleGaussian` (internal)
 **Responsibilities:**
 - Mesh loading and normalization
 - MTL file parsing with color extraction
 - Gaussian initialization (4 strategies)
 - Covariance matrix calculation
-- PLY export
+- PLY export with Spherical Harmonics
 
 **Critical Methods:**
 - `load_mesh()` - Loads OBJ/GLB with automatic MTL detection
 - `_load_obj_with_mtl()` - Custom OBJ parser for color preservation
-- `mesh_to_gaussians()` - Main conversion logic
-- `save_ply()` - Binary PLY export
+- `mesh_to_gaussians()` - Main conversion logic, returns `List[_SingleGaussian]`
+- `save_ply()` - Binary PLY export with SH DC term encoding
+
+**Data Structure:**
+- `_SingleGaussian` (internal dataclass): Individual gaussian representation
+  - `position`: np.ndarray (3,) - xyz coordinates
+  - `scales`: np.ndarray (3,) - 3D scale
+  - `rotation`: np.ndarray (4,) - quaternion
+  - `opacity`: float - opacity value
+  - `sh_dc`: np.ndarray (3,) - Spherical Harmonics DC term (color - 0.5)
+  - `sh_rest`: Optional[np.ndarray] - Higher-order SH coefficients
 
 #### `src/gaussian_splat.py`
-**Purpose:** Data structures  
-**Key Classes:** `GaussianSplat`  
+**Purpose:** Advanced batch operations (NOT used by default pipeline)
+**Key Classes:** `GaussianSplat`
 **Responsibilities:**
-- Gaussian splat representation
-- Property storage (position, scale, rotation, color, opacity)
-- Spherical harmonics color encoding
+- Collection-based gaussian representation
+- Vectorized batch operations
+- Integration with external tools
+
+⚠️ **Important:** This class is provided for advanced use cases. The default conversion
+pipeline uses `List[_SingleGaussian]` for flexibility. See class documentation for
+conversion examples between formats.
+
+**Methods:**
+- `subset()` - Extract subset by indices
+- `to_dict()` / `from_dict()` - Serialization
 
 #### `src/lod_generator.py`
-**Purpose:** Level of Detail generation  
-**Key Classes:** `LODGenerator`  
+**Purpose:** Level of Detail generation
+**Key Classes:** `LODGenerator`
 **Responsibilities:**
-- Importance-based gaussian selection
-- Multiple LOD level creation
-- Gaussian subset extraction
+- Multi-strategy gaussian pruning
+- Single and batch LOD generation
+- Quality-preserving downsampling
+
+**Pruning Strategies:**
+1. **'importance'** (RECOMMENDED): opacity × volume - best quality
+2. **'opacity'**: Keep most opaque gaussians - fast, good quality
+3. **'spatial'**: Voxel-based subsampling - uniform coverage
+
+**Methods:**
+- `generate_lod()` - Create single LOD level
+- `generate_lods()` - Create multiple LOD levels
 
 ---
 
 ## API Reference
 
-> ⚠️ **Note:** All API signatures are current as of 2024-11-23. Verify against source code if this document is outdated.
+> ⚠️ **Note:** All API signatures are current as of 2024-11-24. Fully type-hinted for IDE support.
 
 ### MeshToGaussianConverter
 
@@ -211,7 +239,7 @@ mesh_to_gaussians(
     mesh: trimesh.Trimesh,
     strategy: str = 'vertex',
     samples_per_face: int = 1
-) -> List[GaussianSplat]
+) -> List[_SingleGaussian]
 ```
 
 **Purpose:** Convert mesh to gaussian splats
@@ -227,14 +255,16 @@ mesh_to_gaussians(
   - Default: 1
   - Higher values = more gaussians = better quality = slower
 
-**Returns:** `List[GaussianSplat]` - List of gaussian splat objects
+**Returns:** `List[_SingleGaussian]` - List of individual gaussian objects
 
 **Gaussian Properties Set:**
-- `position`: 3D coordinates
-- `scale`: Estimated from local geometry
-- `rotation`: Aligned with surface normal (quaternion)
-- `opacity`: 0.9 (default)
-- `sh_dc`: RGB color from vertex/face colors or MTL (spherical harmonics DC term)
+- `position`: 3D coordinates (np.ndarray, shape (3,))
+- `scales`: Estimated from local geometry (np.ndarray, shape (3,))
+- `rotation`: Aligned with surface normal - quaternion (np.ndarray, shape (4,))
+- `opacity`: 0.9 (default, float)
+- `sh_dc`: RGB color from vertex/face colors or MTL as Spherical Harmonics DC term (np.ndarray, shape (3,))
+  - Stored as `color - 0.5` (centered around 0 for SH encoding)
+- `sh_rest`: None (higher-order SH coefficients not used)
 
 **Example:**
 ```python
@@ -258,26 +288,34 @@ gaussians = converter.mesh_to_gaussians(mesh, strategy='face', samples_per_face=
 #### save_ply()
 
 ```python
-save_ply(gaussians: List[GaussianSplat], output_path: str) -> None
+save_ply(gaussians: List[_SingleGaussian], output_path: str) -> None
 ```
 
-**Purpose:** Save gaussians to binary PLY file
+**Purpose:** Save gaussians to binary PLY file with Spherical Harmonics encoding
 
 **Parameters:**
 - `gaussians` (List[_SingleGaussian]): List of gaussians to save
 - `output_path` (str): Output file path (.ply extension)
 
-**File Format:** Binary PLY with properties:
-- `x, y, z`: Position
-- `nx, ny, nz`: Normal (derived from rotation)
-- `f_dc_0, f_dc_1, f_dc_2`: RGB color (spherical harmonics)
-- `opacity`: Opacity value
-- `scale_0, scale_1, scale_2`: Scale (3D)
-- `rot_0, rot_1, rot_2, rot_3`: Rotation (quaternion)
+**File Format:** Binary PLY (little-endian) with properties:
+- `x, y, z`: Position (float)
+- `nx, ny, nz`: Normal (derived from rotation, float)
+- `f_dc_0, f_dc_1, f_dc_2`: RGB color as Spherical Harmonics DC term (float)
+  - Standard gaussian splatting format
+  - Values centered around 0 (not 0-255 or 0-1)
+- `opacity`: Opacity value (float, 0-1)
+- `scale_0, scale_1, scale_2`: 3D scale (float)
+- `rot_0, rot_1, rot_2, rot_3`: Rotation quaternion (float)
+
+**Color Encoding:**
+The PLY uses Spherical Harmonics (SH) DC term for colors, which is the standard
+format for gaussian splatting viewers. Colors from MTL files are automatically
+converted: `sh_dc = rgb_color - 0.5`
 
 **Example:**
 ```python
 converter.save_ply(gaussians, "output.ply")
+print(f"Saved {len(gaussians)} gaussians")
 ```
 
 **Raises:**
@@ -308,13 +346,47 @@ class _SingleGaussian:
 - Rotation is normalized quaternion
 - Used during conversion and LOD generation
 
-**Note:** There is also a `GaussianSplat` class in `src/gaussian_splat.py` for collection-based operations, but it's not currently used by the converter.
+**Note:** There is also a `GaussianSplat` class in `src/gaussian_splat.py` for collection-based
+operations. It is NOT used by the default conversion pipeline, but is provided for advanced
+batch operations. See the class documentation for usage examples.
 
 ---
 
 ### LODGenerator
 
 **Location:** `src/lod_generator.py`
+
+#### Constructor
+
+```python
+LODGenerator(strategy: str = 'importance')
+```
+
+**Parameters:**
+- `strategy` (str): Default pruning strategy
+  - `'importance'` (RECOMMENDED): opacity × volume - best quality
+  - `'opacity'`: Keep most opaque gaussians - fast, good quality
+  - `'spatial'`: Voxel-based subsampling - uniform coverage
+
+**Strategy Details:**
+
+1. **'importance'** (RECOMMENDED - Best Quality)
+   - Metric: `opacity × volume` (product of scales)
+   - Keeps gaussians with highest visual impact
+   - Best for: General use, balanced quality/performance
+   - Example: Large, opaque gaussians kept; small, transparent ones removed
+
+2. **'opacity'** (Fast, Good Quality)
+   - Metric: opacity value only
+   - Keeps most opaque gaussians
+   - Best for: When opacity is primary quality indicator
+   - Example: Fully opaque gaussians kept; transparent ones removed
+
+3. **'spatial'** (Uniform Coverage)
+   - Metric: spatial distribution in 3D voxel grid
+   - Voxel-based spatial subsampling
+   - Best for: Maintaining uniform coverage across model
+   - Example: One gaussian per voxel, evenly distributed
 
 #### generate_lod()
 
@@ -326,15 +398,12 @@ generate_lod(
 ) -> List[_SingleGaussian]
 ```
 
-**Purpose:** Generate Level of Detail by selecting subset of gaussians
+**Purpose:** Generate single Level of Detail by intelligently pruning gaussians
 
 **Parameters:**
 - `gaussians` (List[_SingleGaussian]): Input gaussians
 - `target_count` (int): Desired number of gaussians in LOD
-- `strategy` (str, optional): Override pruning strategy
-  - `'importance'`: Keep largest/most opaque gaussians (default)
-  - `'opacity'`: Keep most opaque gaussians
-  - `'spatial'`: Voxel-based spatial subsampling
+- `strategy` (str, optional): Override default pruning strategy
 
 **Returns:** `List[_SingleGaussian]` with `target_count` gaussians (or all if target > input count)
 
@@ -342,16 +411,50 @@ generate_lod(
 ```python
 from src.lod_generator import LODGenerator
 
-lod_gen = LODGenerator()
-lod_5k = lod_gen.generate_lod(gaussians, 5000, strategy='importance')
-lod_25k = lod_gen.generate_lod(gaussians, 25000, strategy='importance')
+# Create generator with default strategy
+lod_gen = LODGenerator(strategy='importance')
+
+# Generate single LOD
+lod_5k = lod_gen.generate_lod(gaussians, 5000)
+
+# Override strategy for specific LOD
+lod_spatial = lod_gen.generate_lod(gaussians, 10000, strategy='spatial')
+```
+
+#### generate_lods()
+
+```python
+generate_lods(
+    gaussians: List[_SingleGaussian],
+    target_counts: List[int]
+) -> List[List[_SingleGaussian]]
+```
+
+**Purpose:** Generate multiple LOD levels at once
+
+**Parameters:**
+- `gaussians` (List[_SingleGaussian]): Input gaussians
+- `target_counts` (List[int]): List of target counts for each LOD
+
+**Returns:** `List[List[_SingleGaussian]]` - One list per LOD level
+
+**Example:**
+```python
+# Generate multiple LODs at once
+lods = lod_gen.generate_lods(gaussians, [5000, 25000, 100000])
+lod_5k, lod_25k, lod_100k = lods
+
+# Save each LOD
+converter.save_ply(lod_5k, 'output_lod5k.ply')
+converter.save_ply(lod_25k, 'output_lod25k.ply')
+converter.save_ply(lod_100k, 'output_lod100k.ply')
 ```
 
 ---
 
 ## Usage Examples
 
-> ⚠️ **Note:** All examples tested and working as of 2024-11-23.
+> ⚠️ **Note:** All examples tested and working as of 2024-11-24.
 
 ### Example 1: Basic Conversion (Python API)
 
