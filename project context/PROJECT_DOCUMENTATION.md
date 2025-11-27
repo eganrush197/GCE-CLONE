@@ -7,8 +7,6 @@
 > 📘 **Documentation Structure:**
 > - This document: Technical overview and implementation details
 > - [CURRENT_PROJECT_STATE.md](CURRENT_PROJECT_STATE.md): Current status snapshot
-> - [COLOR & TEXTURE SUPPORT.md](COLOR%20&%20TEXTURE%20SUPPORT.md): Color implementation details
-> - [COLOR_ENHANCEMENTS_PLAN.md](COLOR_ENHANCEMENTS_PLAN.md): Future enhancements
 > - [../README.md](../README.md): User guide
 
 ---
