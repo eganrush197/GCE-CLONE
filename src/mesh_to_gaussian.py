@@ -64,8 +64,9 @@ class MeshToGaussianConverter:
         return mesh
     
     def _load_obj_with_mtl(self, obj_path: str) -> trimesh.Trimesh:
-        """Special OBJ loader that preserves MTL material colors"""
+        """Special OBJ loader that preserves MTL material colors AND textures"""
         from pathlib import Path
+        from PIL import Image
 
         # First load with trimesh
         mesh = trimesh.load(obj_path, force='mesh', process=False)
@@ -77,7 +78,7 @@ class MeshToGaussianConverter:
 
         print(f"Found MTL file: {mtl_path}")
 
-        # Parse MTL for material colors
+        # Parse MTL for material colors AND texture maps
         materials = {}
         current_mat = None
 
@@ -89,14 +90,43 @@ class MeshToGaussianConverter:
 
                 if parts[0] == 'newmtl':
                     current_mat = parts[1]
-                    materials[current_mat] = [0.7, 0.7, 0.7]
+                    materials[current_mat] = {
+                        'Kd': [0.7, 0.7, 0.7],
+                        'map_Kd': None
+                    }
 
                 elif parts[0] == 'Kd' and current_mat:
                     try:
-                        materials[current_mat] = [float(parts[1]), float(parts[2]), float(parts[3])]
+                        materials[current_mat]['Kd'] = [float(parts[1]), float(parts[2]), float(parts[3])]
                     except:
                         pass
 
+                elif parts[0] == 'map_Kd' and current_mat:
+                    # Store texture filename
+                    materials[current_mat]['map_Kd'] = parts[1]
+
+        # Load texture if referenced
+        texture_image = None
+        for mat_name, mat_data in materials.items():
+            if mat_data['map_Kd']:
+                texture_path = Path(obj_path).parent / mat_data['map_Kd']
+                if texture_path.exists():
+                    texture_image = Image.open(texture_path)
+                    print(f"✓ Loaded texture: {texture_path} ({texture_image.size})")
+                    break
+                else:
+                    print(f"⚠️  Texture not found: {texture_path}")
+
+        # If we have a texture, use trimesh's UV texture system
+        if texture_image is not None:
+            # Convert mesh to have texture visuals
+            mesh.visual = trimesh.visual.TextureVisuals(
+                uv=mesh.visual.uv if hasattr(mesh.visual, 'uv') else None,
+                image=texture_image
+            )
+            return mesh
+
+        # Otherwise fall back to existing face color system
         # Now parse OBJ to map materials to faces
         face_colors = []
         current_material = None
@@ -112,7 +142,7 @@ class MeshToGaussianConverter:
 
                 elif parts[0] == 'f':
                     # Face found, assign current material color
-                    color = materials.get(current_material, [0.7, 0.7, 0.7])
+                    color = materials.get(current_material, {}).get('Kd', [0.7, 0.7, 0.7])
 
                     # Count vertices in this face (handles quads, tris, etc.)
                     # OBJ faces can be: f v1 v2 v3 (triangle) or f v1 v2 v3 v4 (quad)
@@ -146,7 +176,7 @@ class MeshToGaussianConverter:
             print(f"⚠️  Warning: Face color count mismatch ({len(face_colors)} colors vs {len(mesh.faces)} faces)")
             print(f"   Attempting to use default color for all faces...")
             # Fallback: use first material color or gray for all faces
-            default_color = list(materials.values())[0] if materials else [0.7, 0.7, 0.7]
+            default_color = list(materials.values())[0]['Kd'] if materials else [0.7, 0.7, 0.7]
             face_colors = np.array([default_color] * len(mesh.faces))
             if face_colors.max() <= 1.0:
                 face_colors = (face_colors * 255).astype(np.uint8)
@@ -156,6 +186,78 @@ class MeshToGaussianConverter:
 
         return mesh
     
+    def _sample_texture_color(self, mesh: trimesh.Trimesh, vertex_idx: int) -> np.ndarray:
+        """Sample color from texture using UV coordinates for a vertex"""
+        # Check if mesh has texture visuals with UV coordinates
+        if not hasattr(mesh.visual, 'uv') or mesh.visual.uv is None:
+            return None
+
+        if not hasattr(mesh.visual, 'material') or mesh.visual.material is None:
+            return None
+
+        if not hasattr(mesh.visual.material, 'image') or mesh.visual.material.image is None:
+            return None
+
+        # Get UV coordinate for this vertex
+        uv = mesh.visual.uv[vertex_idx]
+
+        return self._sample_texture_at_uv(mesh.visual.material.image, uv)
+
+    def _sample_texture_at_uv(self, image, uv: np.ndarray) -> np.ndarray:
+        """Sample color from texture image at given UV coordinate"""
+        # UV coordinates are in [0, 1] range
+        # Convert to pixel coordinates
+        width, height = image.size
+
+        # UV origin is bottom-left, but image origin is top-left
+        # So we need to flip V coordinate
+        u = uv[0]
+        v = 1.0 - uv[1]
+
+        # Clamp to [0, 1] range
+        u = np.clip(u, 0.0, 1.0)
+        v = np.clip(v, 0.0, 1.0)
+
+        # Convert to pixel coordinates
+        x = int(u * (width - 1))
+        y = int(v * (height - 1))
+
+        # Sample the texture
+        pixel = image.getpixel((x, y))
+
+        # Convert to RGB array (handle RGBA or RGB)
+        if isinstance(pixel, tuple):
+            color = np.array(pixel[:3], dtype=np.float32) / 255.0
+        else:
+            # Grayscale
+            color = np.array([pixel, pixel, pixel], dtype=np.float32) / 255.0
+
+        return color
+
+    def _sample_texture_interpolated(self, mesh: trimesh.Trimesh, face: np.ndarray,
+                                     w1: float, w2: float, w3: float) -> np.ndarray:
+        """Sample color from texture using interpolated UV coordinates"""
+        # Check if mesh has texture visuals
+        if not hasattr(mesh.visual, 'uv') or mesh.visual.uv is None:
+            return None
+
+        if not hasattr(mesh.visual, 'material') or mesh.visual.material is None:
+            return None
+
+        if not hasattr(mesh.visual.material, 'image') or mesh.visual.material.image is None:
+            return None
+
+        # Get UV coordinates for the three vertices of the face
+        uv0 = mesh.visual.uv[face[0]]
+        uv1 = mesh.visual.uv[face[1]]
+        uv2 = mesh.visual.uv[face[2]]
+
+        # Interpolate UV coordinates using barycentric weights
+        uv_interpolated = w1 * uv0 + w2 * uv1 + w3 * uv2
+
+        # Sample texture at interpolated UV
+        return self._sample_texture_at_uv(mesh.visual.material.image, uv_interpolated)
+
     def mesh_to_gaussians(self, mesh: trimesh.Trimesh,
                          strategy: str = 'vertex',
                          samples_per_face: int = 1) -> List[_SingleGaussian]:
@@ -179,7 +281,7 @@ class MeshToGaussianConverter:
             for i, vertex in enumerate(mesh.vertices):
                 # Get vertex normal if available
                 normal = mesh.vertex_normals[i] if hasattr(mesh, 'vertex_normals') else np.array([0, 0, 1])
-                
+
                 # Initial scale based on nearby vertices
                 if i < len(mesh.vertices) - 1:
                     nearby_dists = np.linalg.norm(mesh.vertices - vertex, axis=1)
@@ -187,17 +289,27 @@ class MeshToGaussianConverter:
                     scale = np.min(nearby_dists) * 0.5 if len(nearby_dists) > 0 else 0.01
                 else:
                     scale = 0.01
-                
+
                 # Convert normal to quaternion (simplified - align Z axis with normal)
                 # This is a hack but works for initialization
                 quat = self._normal_to_quaternion(normal)
-                
-                # Get color from vertex colors or use default
-                if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
+
+                # Get color - priority: texture > vertex colors > face colors > default
+                color = None
+
+                # Try to sample from texture first
+                texture_color = self._sample_texture_color(mesh, i)
+                if texture_color is not None:
+                    color = texture_color
+
+                # Fall back to vertex colors
+                if color is None and hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
                     color = mesh.visual.vertex_colors[i][:3]
                     if color.max() > 1.0:
                         color = color / 255.0
-                elif hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
+
+                # Fall back to face colors
+                if color is None and hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
                     # Find a face containing this vertex and use its color
                     for face_idx, face in enumerate(mesh.faces):
                         if i in face:
@@ -205,11 +317,11 @@ class MeshToGaussianConverter:
                             if color.max() > 1.0:
                                 color = color / 255.0
                             break
-                    else:
-                        color = np.array([0.5, 0.5, 0.5])
-                else:
+
+                # Default gray
+                if color is None:
                     color = np.array([0.5, 0.5, 0.5])
-                
+
                 gaussian = _SingleGaussian(
                     position=vertex,
                     scales=np.array([scale, scale, scale * 0.5]),  # Slightly flattened
@@ -226,46 +338,58 @@ class MeshToGaussianConverter:
                     # Random point on triangle
                     r1, r2 = np.random.random(2)
                     sqrt_r1 = np.sqrt(r1)
-                    
+
                     w1 = 1 - sqrt_r1
                     w2 = sqrt_r1 * (1 - r2)
                     w3 = sqrt_r1 * r2
-                    
-                    point = (w1 * mesh.vertices[face[0]] + 
-                           w2 * mesh.vertices[face[1]] + 
+
+                    point = (w1 * mesh.vertices[face[0]] +
+                           w2 * mesh.vertices[face[1]] +
                            w3 * mesh.vertices[face[2]])
-                    
+
                     # Face normal
                     v1 = mesh.vertices[face[1]] - mesh.vertices[face[0]]
                     v2 = mesh.vertices[face[2]] - mesh.vertices[face[0]]
                     normal = np.cross(v1, v2)
                     normal = normal / (np.linalg.norm(normal) + 1e-8)
-                    
+
                     # Scale based on face area
                     area = np.linalg.norm(np.cross(v1, v2)) * 0.5
                     scale = np.sqrt(area) * 0.3
-                    
+
                     quat = self._normal_to_quaternion(normal)
-                    
-                    # Interpolate vertex colors if available
-                    if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
+
+                    # Get color - priority: texture > vertex colors > face colors > default
+                    color = None
+
+                    # Try to sample from texture with interpolated UV
+                    texture_color = self._sample_texture_interpolated(mesh, face, w1, w2, w3)
+                    if texture_color is not None:
+                        color = texture_color
+
+                    # Fall back to interpolated vertex colors
+                    if color is None and hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
                         v_colors = mesh.visual.vertex_colors[face][:, :3]
                         # Normalize to 0-1 range
                         if v_colors.max() > 1.0:
                             v_colors = v_colors / 255.0
                         color = (w1 * v_colors[0] +
-                               w2 * v_colors[1] + 
+                               w2 * v_colors[1] +
                                w3 * v_colors[2])
-                    elif hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
+
+                    # Fall back to face color
+                    if color is None and hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
                         # Use face color
                         face_color = mesh.visual.face_colors[face_idx][:3]
                         if face_color.max() > 1.0:
                             color = face_color / 255.0
                         else:
                             color = face_color
-                    else:
+
+                    # Default gray
+                    if color is None:
                         color = np.array([0.5, 0.5, 0.5])
-                    
+
                     gaussian = _SingleGaussian(
                         position=point,
                         scales=np.array([scale, scale, scale * 0.3]),

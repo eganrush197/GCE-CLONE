@@ -19,6 +19,7 @@ Multi-view rendering is designed for photogrammetry (reconstructing unknown geom
 
 ### Core Capabilities
 - ✅ OBJ and GLB mesh loading with automatic MTL color parsing
+- ✅ **UV texture sampling** - Sample colors directly from texture maps
 - ✅ Four initialization strategies (Vertex, Face, Hybrid, Adaptive)
 - ✅ Automatic gaussian parameter estimation
 - ✅ LOD (Level of Detail) generation with 3 pruning strategies
@@ -27,7 +28,7 @@ Multi-view rendering is designed for photogrammetry (reconstructing unknown geom
   - **Spatial**: Voxel-based - uniform coverage
 - ✅ Spherical Harmonics (SH) color encoding (standard format)
 - ✅ Full type hints for IDE autocomplete and type checking
-- ✅ Comprehensive test suite (8/8 tests passing)
+- ✅ Comprehensive test suite (10/10 tests passing)
 - ✅ Normal-based orientation
 - ✅ Optional quick optimization (100 iterations, GPU-accelerated)
 
@@ -105,6 +106,33 @@ converter.save_ply(lod_25k, 'output_lod25k.ply')
 converter.save_ply(lod_100k, 'output_lod100k.ply')
 ```
 
+## Color & Texture Support
+
+The converter automatically extracts colors from multiple sources with priority:
+
+1. **UV-mapped textures** (NEW!) - Highest quality
+   - Automatically loads textures referenced in MTL files (`map_Kd`)
+   - Samples colors at UV coordinates for each gaussian
+   - Supports both vertex and face strategies with interpolation
+   - Works with PNG, JPG, and other PIL-supported formats
+
+2. **Vertex colors** - Per-vertex color data
+   - Embedded in OBJ files or loaded from mesh
+
+3. **Face colors** - Material colors from MTL files
+   - Diffuse color (`Kd`) applied to faces
+
+4. **Default gray** - Fallback when no colors available
+
+**Example with texture:**
+```python
+# OBJ file references texture in MTL
+# model.mtl contains: map_Kd texture.jpg
+mesh = converter.load_mesh("model.obj")  # Automatically loads texture.jpg
+gaussians = converter.mesh_to_gaussians(mesh, strategy='vertex')
+# Colors sampled from texture at each vertex's UV coordinate
+```
+
 ## Initialization Strategies
 
 Choose the right strategy for your mesh:
@@ -112,14 +140,17 @@ Choose the right strategy for your mesh:
 - **Vertex**: Place gaussians at mesh vertices
   - Fastest option (~1 gaussian per vertex)
   - Best for: Low-poly models, clean geometry
+  - Texture sampling: Uses vertex UV coordinates directly
 
 - **Face**: Sample points on triangle faces
   - Higher quality, more gaussians
   - Best for: Textured meshes, detailed surfaces
+  - Texture sampling: Interpolates UV coordinates using barycentric weights
 
 - **Hybrid**: Combine vertex + face sampling
   - Balanced quality and performance
   - Best for: General use (recommended)
+  - Texture sampling: Both vertex and interpolated sampling
 
 - **Adaptive**: Auto-select based on mesh properties
   - Currently maps to Hybrid
@@ -146,12 +177,13 @@ Choose the right pruning strategy for your use case:
 ```
 GCE CLONE/
 ├── src/
-│   ├── mesh_to_gaussian.py      # Core converter (513 lines)
+│   ├── mesh_to_gaussian.py      # Core converter (630 lines, includes UV sampling)
 │   ├── gaussian_splat.py        # Advanced batch operations (108 lines)
 │   ├── lod_generator.py         # LOD generation (199 lines)
 │   └── __init__.py              # Package exports
 ├── tests/
-│   └── test_converter.py        # Test suite (8/8 passing)
+│   ├── test_converter.py        # Core test suite (8 tests)
+│   └── test_texture_sampling.py # Texture sampling tests (2 tests)
 ├── examples/
 │   └── basic_usage.py           # Usage examples
 ├── convert.py                   # Simple wrapper script
@@ -191,6 +223,7 @@ pytest tests/ -v
 - ✅ GaussianSplat data structure (2 tests)
 - ✅ Mesh conversion strategies (3 tests)
 - ✅ LOD generation strategies (3 tests)
+- ✅ UV texture sampling (2 tests)
 
 ### Code Quality
 

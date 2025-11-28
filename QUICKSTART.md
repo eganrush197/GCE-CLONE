@@ -102,13 +102,34 @@ faces captures surface detail better than just vertices.
 
 ```bash
 # Hybrid strategy works best for textured models
-python mesh2gaussian building.glb building.ply \
+python mesh2gaussian building.obj building.ply \
   --strategy hybrid \
   --samples-per-face 15
 ```
 
 **Why hybrid strategy?** Combines vertex precision with face sampling to capture
 both geometry and texture details.
+
+**Texture Support (NEW):** If your OBJ file has a corresponding MTL file with
+`map_Kd texture.jpg`, the converter will automatically:
+1. Load the texture image
+2. Sample colors at UV coordinates for each gaussian
+3. Interpolate UV coordinates for face-sampled gaussians
+
+**Example with texture:**
+```python
+from src.mesh_to_gaussian import MeshToGaussianConverter
+
+converter = MeshToGaussianConverter(device='cpu')
+
+# Automatically loads texture from MTL file
+mesh = converter.load_mesh("textured_model.obj")
+
+# Colors sampled from texture at UV coordinates
+gaussians = converter.mesh_to_gaussians(mesh, strategy='vertex')
+
+converter.save_ply(gaussians, "output.ply")
+```
 
 ## Understanding LOD Strategies
 
@@ -149,10 +170,11 @@ lod_5k = lod_gen.generate_lod(gaussians, 5000)
 # Run the test suite
 pytest tests/ -v
 
-# Expected output: 8 passed in ~3-6 seconds
+# Expected output: 10 passed in ~5-10 seconds
 # ✅ TestGaussianSplat: 2 tests
 # ✅ TestMeshToGaussianConverter: 3 tests
 # ✅ TestLODGenerator: 3 tests
+# ✅ TestTextureSampling: 2 tests (NEW)
 ```
 
 ## Viewing Results

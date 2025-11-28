@@ -55,13 +55,13 @@ Converts traditional 3D mesh files (OBJ/GLB) into Gaussian Splat representations
 |---------|--------|-------|
 | OBJ/GLB Loading | ✅ Ready | Full support with normalization |
 | MTL Color Parsing | ✅ Ready | Automatic quad-to-triangle handling |
+| UV Texture Sampling | ✅ Ready | Automatic texture loading and UV interpolation |
 | Gaussian Generation | ✅ Ready | 4 strategies: vertex, face, hybrid, adaptive |
 | PLY Export | ✅ Ready | Binary format, Spherical Harmonics (SH) |
 | LOD Generation | ✅ Ready | 3 strategies: importance, opacity, spatial |
 | Type Safety | ✅ Ready | Full type hints for IDE support |
-| Test Coverage | ✅ Ready | 8/8 tests passing |
+| Test Coverage | ✅ Ready | 10/10 tests passing (8 core + 2 texture) |
 | PyTorch Optimization | ⚠️ Limited | Works but slow import on Windows |
-| UV Texture Sampling | 📋 Planned | See COLOR_ENHANCEMENTS_PLAN.md |
 | Batch Processing | 📋 Planned | Single file only currently |
 
 ---
@@ -75,7 +75,7 @@ Converts traditional 3D mesh files (OBJ/GLB) into Gaussian Splat representations
 ```
 GCE CLONE/
 ├── src/                          # Core library
-│   ├── mesh_to_gaussian.py      # Main converter (513 lines)
+│   ├── mesh_to_gaussian.py      # Main converter (630 lines, includes UV sampling)
 │   ├── gaussian_splat.py        # Data structures (108 lines, advanced use)
 │   ├── lod_generator.py         # LOD generation (199 lines)
 │   └── __init__.py             # Package exports
@@ -87,7 +87,8 @@ GCE CLONE/
 ├── setup.py                     # Package setup
 │
 ├── tests/                       # Unit tests
-│   └── test_converter.py       # 8 tests, all passing
+│   ├── test_converter.py       # 8 core tests, all passing
+│   └── test_texture_sampling.py # 2 texture tests, all passing
 │
 ├── examples/                    # Example scripts
 │   └── basic_usage.py
@@ -109,13 +110,17 @@ GCE CLONE/
 **Responsibilities:**
 - Mesh loading and normalization
 - MTL file parsing with color extraction
+- **UV texture loading and sampling** (NEW)
 - Gaussian initialization (4 strategies)
 - Covariance matrix calculation
 - PLY export with Spherical Harmonics
 
 **Critical Methods:**
 - `load_mesh()` - Loads OBJ/GLB with automatic MTL detection
-- `_load_obj_with_mtl()` - Custom OBJ parser for color preservation
+- `_load_obj_with_mtl()` - Custom OBJ parser for color and texture preservation
+- `_sample_texture_color()` - Sample texture at vertex UV coordinate
+- `_sample_texture_at_uv()` - Core texture sampling with UV-to-pixel conversion
+- `_sample_texture_interpolated()` - Interpolate UV and sample for face strategy
 - `mesh_to_gaussians()` - Main conversion logic, returns `List[_SingleGaussian]`
 - `save_ply()` - Binary PLY export with SH DC term encoding
 
@@ -578,7 +583,58 @@ for target_count in lod_levels:
 
 ---
 
-### Example 6: Color Extraction from MTL
+### Example 6: UV Texture Sampling (NEW)
+
+```python
+from src.mesh_to_gaussian import MeshToGaussianConverter
+
+converter = MeshToGaussianConverter(device='cpu')
+
+# Load OBJ with texture reference in MTL
+# model.mtl contains: map_Kd texture.jpg
+mesh = converter.load_mesh("model.obj")
+
+# Check if texture was loaded
+if hasattr(mesh.visual, 'material') and hasattr(mesh.visual.material, 'image'):
+    print(f"✅ Texture loaded: {mesh.visual.material.image.size}")
+    print(f"✅ UV coordinates: {mesh.visual.uv.shape if hasattr(mesh.visual, 'uv') else 'None'}")
+else:
+    print("⚠️ No texture found")
+
+# Convert - colors automatically sampled from texture!
+gaussians = converter.mesh_to_gaussians(mesh, strategy='vertex')
+
+# Verify texture colors in gaussians
+import numpy as np
+colors = np.array([g.sh_dc for g in gaussians[:10]])
+variance = np.var(colors, axis=0).sum()
+print(f"Color variance: {variance:.4f} (>0.01 indicates texture sampling)")
+```
+
+**Expected Output:**
+```
+Found MTL file: model.mtl
+✓ Loaded texture: texture.jpg (1024, 1024)
+Loaded mesh: 5000 vertices, 10000 faces
+✅ Texture loaded: (1024, 1024)
+✅ UV coordinates: (5000, 2)
+Created 5000 initial gaussians
+Color variance: 0.1234 (>0.01 indicates texture sampling)
+```
+
+**How It Works:**
+1. MTL parser detects `map_Kd texture.jpg` directive
+2. Texture image loaded with PIL
+3. Mesh visual converted to `TextureVisuals` with UV coordinates
+4. For each gaussian:
+   - Vertex strategy: Sample at vertex UV coordinate
+   - Face strategy: Interpolate UV using barycentric weights, then sample
+5. UV coordinates converted to pixel coordinates (with V-flip for image origin)
+6. Color sampled from texture and applied to gaussian
+
+---
+
+### Example 7: Color Extraction from MTL
 
 ```python
 from src.mesh_to_gaussian import MeshToGaussianConverter
@@ -1290,11 +1346,11 @@ def mesh_to_gaussians(self, mesh: trimesh.Trimesh,
 - ✅ Vertices (`v x y z`)
 - ✅ Vertex normals (`vn x y z`)
 - ✅ Vertex colors (`v x y z r g b`)
+- ✅ Texture coordinates (`vt u v`) - Used for texture sampling (NEW)
 - ✅ Faces (`f v1 v2 v3` or `f v1/vt1/vn1 v2/vt2/vn2 v3/vt3/vn3`)
 - ✅ Quad faces (auto-converted to triangles)
 - ✅ Material library (`mtllib filename.mtl`)
 - ✅ Material assignment (`usemtl materialname`)
-- ⚠️ Texture coordinates (`vt u v`) - Parsed but not used yet
 - ❌ Groups/Objects - Ignored
 - ❌ Smoothing groups - Ignored
 
@@ -1317,20 +1373,37 @@ f 1//1 2//1 3//1 4//1
 #### MTL Format
 
 **Supported Properties:**
-- ✅ `Kd r g b` - Diffuse color (primary color source)
+- ✅ `Kd r g b` - Diffuse color (fallback when no texture)
+- ✅ `map_Kd filename` - Diffuse texture map (NEW - highest priority)
 - ⚠️ `Ka r g b` - Ambient color (not used yet)
 - ⚠️ `Ks r g b` - Specular color (not used yet)
 - ⚠️ `Ke r g b` - Emissive color (not used yet)
-- ⚠️ `map_Kd filename` - Diffuse texture (not used yet)
+- ⚠️ `map_Ks filename` - Specular texture (not used yet)
+- ⚠️ `map_Bump filename` - Normal/bump map (not used yet)
 - ❌ Other properties - Ignored
 
-**Example MTL:**
+**Example MTL with Texture:**
 ```mtl
-newmtl RedMaterial
+newmtl TexturedMaterial
+Kd 0.8 0.8 0.8
+map_Kd diffuse_texture.jpg
+
+newmtl SolidColorMaterial
 Kd 1.0 0.0 0.0
 Ka 0.2 0.0 0.0
 Ks 0.5 0.5 0.5
 ```
+
+**Color Priority:**
+1. **Texture** (`map_Kd`) - Sampled at UV coordinates (highest quality)
+2. **Solid color** (`Kd`) - Applied to all faces using this material
+3. **Default gray** - If neither texture nor Kd specified
+
+**Texture Support:**
+- Formats: PNG, JPG, BMP, TGA (any PIL-supported format)
+- UV coordinates: Must be present in OBJ file (`vt` lines)
+- Path: Relative to OBJ file location
+- Sampling: Nearest neighbor (bilinear interpolation planned)
 
 **Color Range:**
 - Values should be 0.0-1.0
