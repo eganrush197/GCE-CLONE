@@ -19,7 +19,7 @@ class LODGenerator:
 
     1. 'importance' (RECOMMENDED - Best Quality)
        - Keeps gaussians with highest visual impact
-       - Metric: opacity × volume (product of scales)
+       - Metric: opacity * volume (product of scales)
        - Best for: General use, balanced quality/performance
        - Example: Large, opaque gaussians are kept; small, transparent ones removed
 

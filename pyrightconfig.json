@@ -1,0 +1,24 @@
+{
+  "include": [
+    "src",
+    "examples",
+    "tests",
+    "cli.py"
+  ],
+  "exclude": [
+    "venv",
+    "**/__pycache__",
+    "**/node_modules"
+  ],
+  "extraPaths": [
+    "src"
+  ],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "ignore": [
+    "src/stage1_baker/blender_scripts"
+  ]
+}
+

@@ -1,9 +1,9 @@
 # Unified Gaussian Pipeline - Implementation Specification
 ## Part 1: Executive Summary & System Architecture
 
-**Version:** 1.1
+**Version:** 1.3
 **Date:** November 27, 2025
-**Last Updated:** November 28, 2025
+**Last Updated:** December 1, 2025
 **Project:** Gaussian Mesh Converter + Blender Point Cloud Pipeline Integration
 **Target Team:** 5-7 Python developers with 3D graphics knowledge
 
@@ -16,12 +16,12 @@
 | Phase | Status | Completion Date | Tests | Notes |
 |-------|--------|----------------|-------|-------|
 | **Phase 1: UV Texture Sampling** | ✅ **COMPLETE** | Nov 28, 2025 | 2/2 ✅ | Texture loading & UV sampling working |
-| **Phase 2: Blender Baker** | ⏳ PENDING | - | 0/? | Ready to start |
-| **Phase 3: Pipeline Orchestrator** | ⏳ PENDING | - | 0/? | Blocked by Phase 2 |
+| **Phase 2: Blender Baker** | ✅ **COMPLETE** | Nov 30, 2025 | 7/7 ✅ | Headless baking, UV preservation working |
+| **Phase 3: Pipeline Orchestrator** | ✅ **COMPLETE** | Dec 1, 2025 | 17/17 ✅ | Unified pipeline with CLI working |
 | **Phase 4: FBX Support** | ⏳ PENDING | - | 0/? | Optional |
 
-**Total Test Coverage:** 10/10 tests passing ✅
-**Remaining Timeline:** 3-5 weeks (Phases 2-4)
+**Total Test Coverage:** 34/34 tests passing ✅ (10 converter + 7 baker + 17 pipeline)
+**Remaining Timeline:** 1 week (Phase 4 - optional)
 
 ### 1.2 Project Goal
 
@@ -31,15 +31,16 @@ Build a unified pipeline that converts Blender files with procedural shaders int
 
 **Existing Capabilities:**
 - ✅ OBJ/GLB mesh loading with normalization
-- ✅ **UV texture sampling (NEW!)** - MTL `map_Kd` support with PIL image loading
+- ✅ UV texture sampling - MTL `map_Kd` support with PIL image loading
+- ✅ **Blender Baker** - Headless shader baking with UV preservation
+- ✅ **Unified Pipeline (NEW!)** - Automatic file routing and stage coordination
+- ✅ **CLI Interface (NEW!)** - User-friendly command-line tool
 - ✅ Gaussian generation (4 strategies: vertex, face, hybrid, adaptive)
 - ✅ LOD generation (3 strategies: importance, opacity, spatial)
 - ✅ Binary PLY export with Spherical Harmonics
-- ✅ Comprehensive test suite (10/10 tests passing)
+- ✅ Comprehensive test suite (34/34 tests passing)
 
 **Remaining Gaps:**
-- ⏳ Blender procedural shader baking (Phase 2)
-- ⏳ Unified pipeline orchestration (Phase 3)
 - ⏳ FBX format support (Phase 4 - optional)
 
 ### 1.4 What We're Building

@@ -1,0 +1,31 @@
+{
+  "uv_layer": "uv0",
+  "materials": {
+    "Material_Red": {
+      "diffuse": "test_output_vc\\textures\\red_diffuse.png",
+      "transparency": null,
+      "diffuse_has_alpha": false,
+      "roughness": "test_output_vc\\textures\\red_roughness.png",
+      "is_glossy": false,
+      "normal": null
+    },
+    "Material_Blue": {
+      "diffuse": "test_output_vc\\textures\\blue_diffuse.png",
+      "transparency": "test_output_vc\\textures\\blue_diffuse.png",
+      "diffuse_has_alpha": false,
+      "roughness": null,
+      "is_glossy": false,
+      "normal": null
+    }
+  },
+  "face_materials": [
+    "Material_Red",
+    "Material_Red",
+    "Material_Red",
+    "Material_Blue",
+    "Material_Blue",
+    "Material_Blue"
+  ],
+  "obj_file": "test_output_vc\\test_packed_multi_material.obj",
+  "vertex_colors": "test_output_vc\\vertex_colors.npy"
+}

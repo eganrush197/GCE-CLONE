@@ -51,9 +51,10 @@ def test_blender_baker_invalid_executable():
 def test_blender_baker_script_exists(baker):
     """Test that the Blender Python script exists."""
     assert baker.script_path.exists()
-    
+
     # Check script has required content
-    script_content = baker.script_path.read_text()
+    # Use UTF-8 encoding to handle any non-ASCII characters in the script
+    script_content = baker.script_path.read_text(encoding='utf-8')
     assert "bake_and_export" in script_content
     assert "bpy.ops.object.bake" in script_content
 

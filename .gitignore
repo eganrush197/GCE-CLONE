@@ -47,10 +47,23 @@ output/
 cache/
 models/
 
+# Blender files
+*.blend
+*.blend1
+
 # Test outputs
 test_cube.obj
 test_output*.ply
 test_*.ply
+skull*.obj
+skull*.mtl
+skull*.ply
+skull*.jpg
+*.jpg
+*.jpeg
+
+# CLI test outputs
+cli_test_output/
 
 # OS
 .DS_Store

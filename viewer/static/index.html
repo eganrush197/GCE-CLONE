@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gaussian Splat Viewer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Main Canvas -->
+    <canvas id="viewer-canvas"></canvas>
+    
+    <!-- UI Overlay -->
+    <div id="ui-overlay">
+        <!-- Header -->
+        <div id="header">
+            <h1>🎨 Gaussian Splat Viewer</h1>
+        </div>
+        
+        <!-- File Selector -->
+        <div id="file-panel" class="panel">
+            <h3>Files</h3>
+            <div id="file-list" class="file-list">
+                <div class="loading">Loading files...</div>
+            </div>
+        </div>
+        
+        <!-- Info Panel -->
+        <div id="info-panel" class="panel">
+            <h3>Info</h3>
+            <div id="info-content">
+                <div class="info-row">
+                    <span class="label">File:</span>
+                    <span id="current-file">None</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Points:</span>
+                    <span id="point-count">0</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">FPS:</span>
+                    <span id="fps">0</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Controls Help -->
+        <div id="controls-panel" class="panel">
+            <h3>Controls</h3>
+            <div class="controls-help">
+                <div>🖱️ <strong>Left Click + Drag:</strong> Rotate</div>
+                <div>🖱️ <strong>Right Click + Drag:</strong> Pan</div>
+                <div>🖱️ <strong>Scroll:</strong> Zoom</div>
+            </div>
+        </div>
+        
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="hidden">
+            <div class="spinner"></div>
+            <div class="loading-text">Loading gaussian data...</div>
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <div id="progress-text" class="progress-text">0%</div>
+            </div>
+        </div>
+
+        <!-- Console Log Panel -->
+        <div id="console-panel" class="panel console-panel">
+            <div class="console-header">
+                <h3>Console Log</h3>
+                <button id="clear-console" class="btn-small">Clear</button>
+            </div>
+            <div id="console-content" class="console-content"></div>
+        </div>
+    </div>
+    
+    <!-- Three.js from CDN -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <!-- Main Application -->
+    <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,327 @@
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    overflow: hidden;
+    background: #0a0a0a;
+    color: #ffffff;
+}
+
+/* Canvas */
+#viewer-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* UI Overlay */
+#ui-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 100;
+}
+
+#ui-overlay > * {
+    pointer-events: auto;
+}
+
+/* Header */
+#header {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    padding: 15px 30px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#header h1 {
+    font-size: 1.5em;
+    font-weight: 600;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Panels */
+.panel {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    min-width: 250px;
+    max-width: 350px;
+}
+
+.panel h3 {
+    margin: 0 0 15px 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #667eea;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 10px;
+}
+
+/* File Panel */
+#file-panel {
+    top: 120px;
+    left: 20px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.file-item {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.file-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(102, 126, 234, 0.5);
+}
+
+.file-item.active {
+    background: rgba(102, 126, 234, 0.2);
+    border-color: #667eea;
+}
+
+.file-name {
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.file-info {
+    font-size: 0.85em;
+    color: #888;
+}
+
+.loading {
+    text-align: center;
+    color: #888;
+    padding: 20px;
+}
+
+/* Info Panel */
+#info-panel {
+    top: 120px;
+    right: 20px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-row .label {
+    color: #888;
+    font-weight: 500;
+}
+
+/* Controls Panel */
+#controls-panel {
+    bottom: 20px;
+    right: 20px;
+}
+
+.controls-help div {
+    padding: 6px 0;
+    font-size: 0.9em;
+}
+
+/* Console Panel */
+#console-panel {
+    bottom: 20px;
+    left: 20px;
+    max-width: 500px;
+    max-height: 300px;
+    display: flex;
+    flex-direction: column;
+}
+
+.console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.console-header h3 {
+    margin: 0;
+}
+
+.btn-small {
+    background: rgba(102, 126, 234, 0.2);
+    border: 1px solid #667eea;
+    color: #667eea;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: all 0.2s;
+}
+
+.btn-small:hover {
+    background: rgba(102, 126, 234, 0.3);
+}
+
+.console-content {
+    flex: 1;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85em;
+    line-height: 1.4;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 6px;
+    max-height: 250px;
+}
+
+.console-entry {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.console-entry:last-child {
+    border-bottom: none;
+}
+
+.console-timestamp {
+    color: #666;
+    margin-right: 8px;
+}
+
+.console-level-info {
+    color: #4CAF50;
+}
+
+.console-level-warn {
+    color: #FFC107;
+}
+
+.console-level-error {
+    color: #F44336;
+}
+
+.console-level-debug {
+    color: #2196F3;
+}
+
+/* Loading Overlay */
+#loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+#loading-overlay.hidden {
+    display: none;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(255, 255, 255, 0.1);
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-text {
+    margin-top: 20px;
+    font-size: 1.1em;
+    color: #888;
+}
+
+.progress-container {
+    margin-top: 30px;
+    width: 400px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    margin-top: 10px;
+    text-align: center;
+    color: #667eea;
+    font-weight: 600;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+

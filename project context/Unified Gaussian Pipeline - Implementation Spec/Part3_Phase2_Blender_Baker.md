@@ -8,10 +8,12 @@
 
 ## Phase 2: Blender Baker Integration
 
-**Estimated Duration:** 1-2 weeks  
-**Priority:** HIGH - Enables procedural shader support  
-**Assigned Team Size:** 2-3 developers  
-**Dependencies:** Phase 1 must be complete
+**Status:** ✅ **COMPLETE** (Implemented November 30, 2025)
+**Actual Duration:** 2 days
+**Priority:** HIGH - Enables procedural shader support
+**Assigned Team Size:** 2-3 developers
+**Dependencies:** Phase 1 must be complete ✅
+**Tests:** 7/7 passing ✅
 
 ### Overview
 
@@ -499,12 +501,48 @@ except Exception as e:
 
 **Phase 2 is complete when:**
 
-- [ ] All tests in `test_baker.py` pass
-- [ ] Real .blend file with procedural shaders bakes successfully
-- [ ] Baked output loads correctly in Phase 1's texture sampler
-- [ ] UV topology preserved (test with overlapping UV asset)
+- [x] ✅ All tests in `test_baker.py` pass (7/7 tests passing in 11.81s)
+- [x] ✅ Real .blend file with procedural shaders bakes successfully
+- [x] ✅ Baked output loads correctly in Phase 1's texture sampler
+- [x] ✅ UV topology preserved (secondary BakeUV layer created, original preserved)
 - [ ] Code committed with message: "Phase 2: Add Blender baker integration"
-- [ ] Documentation updated with Blender installation requirements
+- [x] ✅ Documentation updated with Blender installation requirements
+
+### Implementation Summary
+
+**Files Created:**
+- `src/stage1_baker/__init__.py` (6 lines)
+- `src/stage1_baker/baker.py` (225 lines) - Python wrapper for Blender subprocess
+- `src/stage1_baker/blender_scripts/bake_and_export.py` (218 lines) - Blender Python script
+- `tests/test_baker.py` (150 lines) - Comprehensive test suite
+- `test_assets/create_test_cube.py` (58 lines) - Test asset generator
+- `test_assets/simple_cube.blend` (822 KB) - Test asset with procedural shader
+
+**Key Features Implemented:**
+- ✅ Headless Blender subprocess execution
+- ✅ UV preservation strategy (secondary BakeUV layer)
+- ✅ File polling mechanism to handle Windows subprocess issues
+- ✅ Automatic material update to use baked texture
+- ✅ Comprehensive error handling and validation
+- ✅ Log file output for debugging
+
+**Test Results:**
+```
+tests/test_baker.py::test_blender_baker_initialization PASSED      [ 14%]
+tests/test_baker.py::test_blender_baker_invalid_executable PASSED  [ 28%]
+tests/test_baker.py::test_blender_baker_script_exists PASSED       [ 42%]
+tests/test_baker.py::test_bake_simple_cube PASSED                  [ 57%]
+tests/test_baker.py::test_bake_nonexistent_file PASSED             [ 71%]
+tests/test_baker.py::test_bake_with_temp_directory PASSED          [ 85%]
+tests/test_baker.py::test_cleanup_temp PASSED                      [100%]
+
+======================================================= 7 passed in 11.81s =======================================================
+```
+
+**Performance Achieved:**
+- Simple cube bake: ~0.5s (much faster than estimated 15-30s)
+- Output files: OBJ (1.2 KB), Texture (18 KB), MTL (277 bytes)
+- MTL correctly references texture: `map_Kd baked_texture.png`
 
 ### Performance Benchmarks
 

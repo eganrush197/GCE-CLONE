@@ -1,0 +1,44 @@
+{
+  "uv_layer": "uv0",
+  "materials": {
+    "Material_Blue": {
+      "diffuse": {
+        "path": "test_output_multi_uv\\textures\\blue_diffuse.png",
+        "uv_layer": "uv0"
+      },
+      "transparency": {
+        "path": "test_output_multi_uv\\textures\\blue_diffuse.png",
+        "uv_layer": "uv0"
+      },
+      "diffuse_has_alpha": false,
+      "roughness": null,
+      "is_glossy": false,
+      "normal": null
+    },
+    "Material_Red": {
+      "diffuse": {
+        "path": "test_output_multi_uv\\textures\\red_diffuse.png",
+        "uv_layer": "uv0"
+      },
+      "transparency": null,
+      "diffuse_has_alpha": false,
+      "roughness": {
+        "path": "test_output_multi_uv\\textures\\red_roughness.png",
+        "uv_layer": "uv0"
+      },
+      "is_glossy": false,
+      "normal": null
+    }
+  },
+  "face_materials": [
+    "Material_Red",
+    "Material_Red",
+    "Material_Red",
+    "Material_Blue",
+    "Material_Blue",
+    "Material_Blue"
+  ],
+  "obj_file": "test_output_multi_uv\\test_packed_multi_material.obj",
+  "vertex_colors": "test_output_multi_uv\\vertex_colors.npy",
+  "uv_layers": {}
+}

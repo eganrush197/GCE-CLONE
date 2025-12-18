@@ -38,9 +38,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'mesh2gaussian=mesh_to_gaussian:cli_main',
+            'gaussian-pipeline=cli:main',
         ],
     },
+    scripts=['cli.py'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',

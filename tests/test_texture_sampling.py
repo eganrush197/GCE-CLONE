@@ -16,10 +16,15 @@ from PIL import Image
 def test_load_obj_with_texture_map():
     """Test that OBJ with map_Kd texture reference loads the image"""
     converter = MeshToGaussianConverter(device='cpu')
-    
-    # This will fail - current code doesn't load textures
-    mesh = converter.load_mesh("skull-color-export-test.obj")
-    
+
+    # Use the test output from baker tests
+    test_obj = Path("test_output/simple_cube.obj")
+
+    if not test_obj.exists():
+        pytest.skip("Test asset not found - run baker tests first")
+
+    mesh = converter.load_mesh(str(test_obj))
+
     # Check that texture was loaded
     assert hasattr(mesh.visual, 'material'), "Mesh should have material"
     assert mesh.visual.material.image is not None, "Material should have texture image"
@@ -31,7 +36,14 @@ def test_gaussians_sample_from_texture():
     import trimesh
 
     converter = MeshToGaussianConverter(device='cpu')
-    mesh = converter.load_mesh("skull-color-export-test.obj")
+
+    # Use the test output from baker tests
+    test_obj = Path("test_output/simple_cube.obj")
+
+    if not test_obj.exists():
+        pytest.skip("Test asset not found - run baker tests first")
+
+    mesh = converter.load_mesh(str(test_obj))
 
     # Instead of creating a new mesh, just sample a small number of gaussians
     # from the original mesh to keep the test fast

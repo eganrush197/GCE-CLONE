@@ -364,13 +364,14 @@ python cli.py model.blend ./output --keep-temp
 - [x] ✅ Verify skull model with texture works
 - [x] ✅ Commit code
 
-### Phase 2: Blender Baker
-- [ ] Create `stage1_baker/` directory structure
-- [ ] Implement `baker.py` Python wrapper
-- [ ] Implement `blender_scripts/bake_and_export.py`
-- [ ] Write and pass all tests
-- [ ] Create test assets
-- [ ] Verify real .blend file bakes successfully
+### Phase 2: Blender Baker ✅ COMPLETE (Nov 30, 2025)
+- [x] ✅ Create `stage1_baker/` directory structure
+- [x] ✅ Implement `baker.py` Python wrapper (225 lines)
+- [x] ✅ Implement `blender_scripts/bake_and_export.py` (218 lines)
+- [x] ✅ Write and pass all tests (7/7 passing in 11.81s)
+- [x] ✅ Create test assets (simple_cube.blend with procedural shader)
+- [x] ✅ Verify real .blend file bakes successfully
+- [x] ✅ Fix Windows subprocess hanging issue
 - [ ] Commit code
 
 ### Phase 3: Pipeline Orchestrator
