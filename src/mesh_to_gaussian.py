@@ -410,6 +410,11 @@ class MeshToGaussianConverter:
                 # RGBA - drop alpha channel
                 img_array = img_array[:, :, :3]
 
+            # FIX: Swap Red and Green channels (Blender exports with swapped channels)
+            # This fixes the issue where leaves appear brown and bark appears green
+            if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
+                img_array = img_array[:, :, [1, 0, 2]]  # Swap R and G channels (G, R, B)
+
             # Add to cache
             self._texture_cache[cache_key] = img_array
 

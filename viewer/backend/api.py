@@ -83,13 +83,16 @@ async def broadcast_file_event(event_type: str, file_path: str):
 
 
 @router.get("/files", response_model=FilesResponse)
-async def list_files(watch_dir: str = "output_clouds"):
+async def list_files(watch_dir: str = None):
     """
     List all PLY files in the watched directory.
-    
+
     Returns:
         FilesResponse with main files and LOD files
     """
+    # Default to parent directory's output_clouds
+    if watch_dir is None:
+        watch_dir = str(Path(__file__).parent.parent.parent / "output_clouds")
     watch_path = Path(watch_dir)
     lod_path = watch_path / "LOD_output"
     
@@ -117,7 +120,7 @@ async def list_files(watch_dir: str = "output_clouds"):
 
 
 @router.get("/load/{filename}")
-async def load_file(filename: str, watch_dir: str = "output_clouds", chunk_size: int = 100000):
+async def load_file(filename: str, watch_dir: str = None, chunk_size: int = 100000):
     """
     Load gaussian data from PLY file with chunked streaming.
 
@@ -128,6 +131,9 @@ async def load_file(filename: str, watch_dir: str = "output_clouds", chunk_size:
     Returns:
         Gaussian data dictionary
     """
+    # Default to parent directory's output_clouds
+    if watch_dir is None:
+        watch_dir = str(Path(__file__).parent.parent.parent / "output_clouds")
     watch_path = Path(watch_dir)
 
     # Try main directory first
@@ -149,7 +155,7 @@ async def load_file(filename: str, watch_dir: str = "output_clouds", chunk_size:
 
 
 @router.get("/load-stream/{filename}")
-async def load_file_stream(filename: str, watch_dir: str = "output_clouds"):
+async def load_file_stream(filename: str, watch_dir: str = None):
     """
     Stream gaussian data from PLY file in chunks with progress updates.
     DEPRECATED: Use /load-binary for better performance.
@@ -163,6 +169,9 @@ async def load_file_stream(filename: str, watch_dir: str = "output_clouds"):
     from fastapi.responses import StreamingResponse
     import json
 
+    # Default to parent directory's output_clouds
+    if watch_dir is None:
+        watch_dir = str(Path(__file__).parent.parent.parent / "output_clouds")
     watch_path = Path(watch_dir)
 
     # Try main directory first
@@ -212,7 +221,7 @@ async def load_file_stream(filename: str, watch_dir: str = "output_clouds"):
 
 
 @router.get("/load-binary/{filename}")
-async def load_file_binary(filename: str, watch_dir: str = "output_clouds"):
+async def load_file_binary(filename: str, watch_dir: str = None):
     """
     Stream gaussian data as binary chunks for maximum performance.
 
@@ -243,6 +252,9 @@ async def load_file_binary(filename: str, watch_dir: str = "output_clouds"):
     import struct
     import numpy as np
 
+    # Default to parent directory's output_clouds
+    if watch_dir is None:
+        watch_dir = str(Path(__file__).parent.parent.parent / "output_clouds")
     watch_path = Path(watch_dir)
 
     # Try main directory first
@@ -358,13 +370,16 @@ async def load_file_binary(filename: str, watch_dir: str = "output_clouds"):
 
 
 @router.post("/generate-lod", response_model=LODGenerateResponse)
-async def generate_lod(request: LODGenerateRequest, watch_dir: str = "output_clouds"):
+async def generate_lod(request: LODGenerateRequest, watch_dir: str = None):
     """
     Generate LOD from full-resolution file.
-    
+
     This endpoint will be fully implemented in Phase 3.
     For now, it returns a placeholder response.
     """
+    # Default to parent directory's output_clouds
+    if watch_dir is None:
+        watch_dir = str(Path(__file__).parent.parent.parent / "output_clouds")
     # TODO: Implement in Phase 3
     raise HTTPException(status_code=501, detail="LOD generation will be implemented in Phase 3")
 
