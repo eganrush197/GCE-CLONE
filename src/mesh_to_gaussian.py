@@ -696,6 +696,49 @@ class MeshToGaussianConverter:
         self.logger.debug("Generated %d mipmap levels", len(mipmaps))
         return mipmaps
 
+    def _resolve_texture_path(self, texture_path: str, manifest_dir: Path) -> Path:
+        """
+        Resolve texture path relative to manifest location (Fix 1D).
+
+        Args:
+            texture_path: Path from manifest (may be relative or absolute)
+            manifest_dir: Directory containing the manifest file
+
+        Returns:
+            Resolved absolute path to texture
+
+        Raises:
+            FileNotFoundError: If texture cannot be found
+        """
+        path = Path(texture_path)
+
+        # If already absolute and exists, use it
+        if path.is_absolute() and path.exists():
+            return path
+
+        # Try relative to manifest directory
+        resolved = manifest_dir / path.name
+        if resolved.exists():
+            self.logger.debug("Resolved texture: %s -> %s", texture_path, resolved)
+            return resolved
+
+        # Try the original path as-is (might be relative to CWD)
+        if path.exists():
+            return path
+
+        # Try relative to manifest directory with full relative path
+        resolved_full = manifest_dir / path
+        if resolved_full.exists():
+            self.logger.debug("Resolved texture: %s -> %s", texture_path, resolved_full)
+            return resolved_full
+
+        # Failed to resolve
+        self.logger.error("Texture not found: %s", texture_path)
+        self.logger.error("  Tried: %s", resolved)
+        self.logger.error("  Tried: %s", path)
+        self.logger.error("  Tried: %s", resolved_full)
+        raise FileNotFoundError(f"Texture not found: {texture_path}")
+
     def _load_material_textures(self, manifest: dict, use_mipmaps: bool = True) -> dict:
         """
         Load all textures referenced in the material manifest.
@@ -711,6 +754,10 @@ class MeshToGaussianConverter:
 
         material_textures = {}
 
+        # Get manifest directory for path resolution (Fix 1D)
+        manifest_path = manifest.get('_manifest_path')
+        manifest_dir = Path(manifest_path).parent if manifest_path else Path('.')
+
         for mat_name, mat_data in manifest.get('materials', {}).items():
             textures = {}
 
@@ -720,6 +767,9 @@ class MeshToGaussianConverter:
                 try:
                     # Handle both old format (string path) and new format (dict with path and uv_layer)
                     diffuse_path = diffuse_entry['path'] if isinstance(diffuse_entry, dict) else diffuse_entry
+
+                    # Resolve path (Fix 1D)
+                    diffuse_path = self._resolve_texture_path(diffuse_path, manifest_dir)
 
                     img = Image.open(diffuse_path)
                     base_texture = np.array(img, dtype=np.float32) / 255.0
@@ -743,6 +793,9 @@ class MeshToGaussianConverter:
                     # Handle both old format (string path) and new format (dict with path and uv_layer)
                     transparency_path = transparency_entry['path'] if isinstance(transparency_entry, dict) else transparency_entry
 
+                    # Resolve path (Fix 1D)
+                    transparency_path = self._resolve_texture_path(transparency_path, manifest_dir)
+
                     img = Image.open(transparency_path)
                     base_texture = np.array(img, dtype=np.float32) / 255.0
                     if len(base_texture.shape) == 3:
@@ -760,7 +813,13 @@ class MeshToGaussianConverter:
             elif mat_data.get('diffuse_has_alpha') and 'diffuse' in textures:
                 # Use alpha channel from diffuse
                 try:
-                    img = Image.open(mat_data['diffuse'])
+                    # Resolve path (Fix 1D)
+                    diffuse_alpha_path = mat_data['diffuse']
+                    if isinstance(diffuse_alpha_path, dict):
+                        diffuse_alpha_path = diffuse_alpha_path['path']
+                    diffuse_alpha_path = self._resolve_texture_path(diffuse_alpha_path, manifest_dir)
+
+                    img = Image.open(diffuse_alpha_path)
                     if img.mode == 'RGBA':
                         base_texture = np.array(img, dtype=np.float32)[:, :, 3] / 255.0
 
@@ -780,6 +839,9 @@ class MeshToGaussianConverter:
                 try:
                     # Handle both old format (string path) and new format (dict with path and uv_layer)
                     roughness_path = roughness_entry['path'] if isinstance(roughness_entry, dict) else roughness_entry
+
+                    # Resolve path (Fix 1D)
+                    roughness_path = self._resolve_texture_path(roughness_path, manifest_dir)
 
                     img = Image.open(roughness_path)
                     base_texture = np.array(img, dtype=np.float32) / 255.0
@@ -826,9 +888,20 @@ class MeshToGaussianConverter:
             self.logger.debug("No UV layers in manifest")
             return {}
 
+        # Get manifest directory for path resolution (Fix 1D)
+        manifest_path = manifest.get('_manifest_path')
+        manifest_dir = Path(manifest_path).parent if manifest_path else Path('.')
+
         for uv_layer_name, uv_path in uv_layer_files.items():
             try:
-                uv_coords = np.load(uv_path)
+                # Resolve path (Fix 1D)
+                uv_path_resolved = Path(uv_path)
+                if not uv_path_resolved.is_absolute():
+                    uv_path_resolved = manifest_dir / uv_path_resolved.name
+                    if not uv_path_resolved.exists():
+                        uv_path_resolved = manifest_dir / uv_path
+
+                uv_coords = np.load(str(uv_path_resolved))
                 uv_layers[uv_layer_name] = uv_coords
                 self.logger.info("Loaded UV layer '%s': %s", uv_layer_name, uv_coords.shape)
             except Exception as e:
@@ -856,7 +929,17 @@ class MeshToGaussianConverter:
             return None
 
         try:
-            vertex_colors = np.load(vertex_color_path)
+            # Resolve path (Fix 1D)
+            manifest_path = manifest.get('_manifest_path')
+            manifest_dir = Path(manifest_path).parent if manifest_path else Path('.')
+
+            vc_path_resolved = Path(vertex_color_path)
+            if not vc_path_resolved.is_absolute():
+                vc_path_resolved = manifest_dir / vc_path_resolved.name
+                if not vc_path_resolved.exists():
+                    vc_path_resolved = manifest_dir / vertex_color_path
+
+            vertex_colors = np.load(str(vc_path_resolved))
             self.logger.info("Loaded vertex colors: %s", vertex_colors.shape)
             return vertex_colors
         except Exception as e:

@@ -180,6 +180,9 @@ class Pipeline:
                 timeout=self.config.bake_timeout
             )
 
+            # Add manifest location for path resolution (Fix 1D)
+            manifest['_manifest_path'] = str(self.temp_dir / "material_manifest.json")
+
             # Add vertex color blend mode to manifest
             manifest['vertex_color_blend_mode'] = self.config.vertex_color_blend_mode
 
