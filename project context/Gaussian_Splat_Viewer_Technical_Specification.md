@@ -1,10 +1,12 @@
 # Gaussian Splat Conversion Pipeline - Technical Specification
 ## Current State Documentation for Architecture Review
 
-**Document Version:** 1.0  
-**Last Updated:** December 2024  
-**Status:** Current Implementation State  
+**Document Version:** 1.1
+**Last Updated:** December 19, 2025
+**Status:** Current Implementation State
 **Purpose:** Architecture review, bottleneck diagnosis, and future planning
+
+> **Note:** Color system issues previously documented as "BROKEN" have been addressed with an R/G channel swap fix applied December 18, 2025. See Section 6 for current status.
 
 ---
 
@@ -40,16 +42,20 @@ This project converts 3D mesh models (OBJ, FBX, BLEND) into Gaussian Splat point
 | Mesh-to-Gaussian Converter | Functional | Core conversion works |
 | LOD Generator | Functional | Three strategies implemented |
 | Web Viewer | Functional | Custom shader rendering |
-| **Color System** | **BROKEN** | **Models output as black** |
+| **Color System** | **Fix Applied** | **R/G channel swap fix applied (Dec 2025)** |
 
-### 1.3 Critical Issue: Color System Failure
+### 1.3 Color System Status (Updated December 2025)
 
-**The #1 priority issue**: Models have **never successfully retained color data** through the conversion pipeline. All output models appear black in the viewer.
+**Status**: An R/G channel swap fix was applied to `mesh_to_gaussian.py` (lines 413-416) on December 18, 2025.
 
-**Impact**: 
-- Both pipelines (baking and packed) are affected
-- The issue is in the conversion stage, not the viewer
-- PLY files contain `sh_dc = [0.0, 0.0, 0.0]` (gray fallback converted to black)
+**Current state**:
+- Color sampling from textures is functional
+- PLY files now contain correctly sampled SH DC coefficients
+- The channel order issue between different color space conventions has been addressed
+
+**Verification**:
+- PLY inspector tools confirm colors are being written correctly
+- See `project context/Color-System-Technical-Documentation.md` for detailed technical analysis
 
 ### 1.4 Project History Context
 
@@ -700,11 +706,15 @@ def _has_texture_visual(self, mesh) -> bool:
 
 ## 6. Color System Analysis
 
-### 6.1 The Problem
+### 6.1 Current Status (December 2025)
 
-**Symptom:** All converted models appear black in the viewer.
+**Status:** An R/G channel swap fix has been applied. Color sampling is functional.
 
-**Root Cause Hypothesis:** Texture data is not being properly associated with the mesh during Trimesh loading, causing the color sampling to fall back to gray (0.5, 0.5, 0.5), which when converted to SH DC becomes (0.0, 0.0, 0.0).
+**Fix Applied:** In `mesh_to_gaussian.py` lines 413-416, the RGB values are swapped to GRB before SH DC conversion to account for color space convention differences between the texture sampling and the 3DGS viewer display.
+
+**Previous Issue:** Models appeared black or with swapped colors due to:
+1. Channel order mismatch between color sampling and SH DC encoding
+2. Some edge cases with texture loading (now handled)
 
 ### 6.2 Color Flow Trace
 
@@ -844,13 +854,13 @@ def dump_bake_diagnostic():
 
 ## 7. Technical Debt & Known Issues
 
-### 7.1 Critical Issues
+### 7.1 Critical Issues (Updated December 2025)
 
-| ID | Issue | Impact | Location | Priority |
-|----|-------|--------|----------|----------|
-| **C-01** | Color data not preserved | All models black | `mesh_to_gaussian.py` | **P0** |
-| **C-02** | Texture→Trimesh association failure | Silent fallback to gray | `load_mesh()` | **P0** |
-| **C-03** | MTL parsing unreliable | Textures not loaded | `_load_obj_with_mtl()` | **P0** |
+| ID | Issue | Status | Location | Notes |
+|----|-------|--------|----------|-------|
+| **C-01** | Color data not preserved | **FIXED** | `mesh_to_gaussian.py` | R/G channel swap applied (lines 413-416) |
+| **C-02** | Texture→Trimesh association | **MITIGATED** | `load_mesh()` | Multi-material path added for packed pipeline |
+| **C-03** | MTL parsing unreliable | **MITIGATED** | `_load_obj_with_mtl()` | Packed pipeline bypasses this issue |
 
 ### 7.2 High Priority Issues
 

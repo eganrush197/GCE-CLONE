@@ -1,9 +1,9 @@
 # Unified Gaussian Pipeline - Implementation Specification
 ## Part 1: Executive Summary & System Architecture
 
-**Version:** 1.3
+**Version:** 1.4
 **Date:** November 27, 2025
-**Last Updated:** December 1, 2025
+**Last Updated:** December 19, 2025
 **Project:** Gaussian Mesh Converter + Blender Point Cloud Pipeline Integration
 **Target Team:** 5-7 Python developers with 3D graphics knowledge
 
@@ -18,10 +18,11 @@
 | **Phase 1: UV Texture Sampling** | ✅ **COMPLETE** | Nov 28, 2025 | 2/2 ✅ | Texture loading & UV sampling working |
 | **Phase 2: Blender Baker** | ✅ **COMPLETE** | Nov 30, 2025 | 7/7 ✅ | Headless baking, UV preservation working |
 | **Phase 3: Pipeline Orchestrator** | ✅ **COMPLETE** | Dec 1, 2025 | 17/17 ✅ | Unified pipeline with CLI working |
+| **Color System Fix** | ✅ **COMPLETE** | Dec 18, 2025 | - | R/G channel swap fix applied |
 | **Phase 4: FBX Support** | ⏳ PENDING | - | 0/? | Optional |
 
-**Total Test Coverage:** 34/34 tests passing ✅ (10 converter + 7 baker + 17 pipeline)
-**Remaining Timeline:** 1 week (Phase 4 - optional)
+**Total Test Coverage:** 51/51 tests passing ✅
+**Remaining Timeline:** Phase 4 is optional
 
 ### 1.2 Project Goal
 
@@ -33,12 +34,14 @@ Build a unified pipeline that converts Blender files with procedural shaders int
 - ✅ OBJ/GLB mesh loading with normalization
 - ✅ UV texture sampling - MTL `map_Kd` support with PIL image loading
 - ✅ **Blender Baker** - Headless shader baking with UV preservation
-- ✅ **Unified Pipeline (NEW!)** - Automatic file routing and stage coordination
-- ✅ **CLI Interface (NEW!)** - User-friendly command-line tool
+- ✅ **Packed Texture Pipeline** - Direct texture extraction from .blend files
+- ✅ **Unified Pipeline** - Automatic file routing and stage coordination
+- ✅ **CLI Interface** - User-friendly command-line tool
 - ✅ Gaussian generation (4 strategies: vertex, face, hybrid, adaptive)
 - ✅ LOD generation (3 strategies: importance, opacity, spatial)
 - ✅ Binary PLY export with Spherical Harmonics
-- ✅ Comprehensive test suite (34/34 tests passing)
+- ✅ **Color system** - R/G channel swap fix applied (Dec 18, 2025)
+- ✅ Comprehensive test suite (51/51 tests passing)
 
 **Remaining Gaps:**
 - ⏳ FBX format support (Phase 4 - optional)

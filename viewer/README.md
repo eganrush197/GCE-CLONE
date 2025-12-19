@@ -7,30 +7,31 @@ Web-based viewer for Gaussian Splat PLY files with real-time LOD generation and 
 ### Phase 1: Backend Foundation ✅ COMPLETE
 
 - **FastAPI Server**: Modern async web framework
-- **PLY Parser**: Binary PLY reader for 20-property gaussian format
+- **PLY Parser**: Binary PLY reader for gaussian format
 - **File Watcher**: Real-time monitoring of `output_clouds/` directory
 - **REST API**: List files, load gaussian data
 - **WebSocket API**: Real-time file change notifications
 - **CORS Support**: For local development
 
-### Phase 2: Basic Renderer (Coming Soon)
+### Phase 2: Basic Renderer ✅ COMPLETE
 
 - Three.js WebGL renderer
 - Orbit camera controls
 - File selection UI
-- Basic gaussian visualization
+- Gaussian visualization with custom shaders
 
-### Phase 3: LOD System (Coming Soon)
+### Phase 3: LOD & Streaming ✅ COMPLETE
 
-- Server-side LOD generation using existing `LODGenerator`
-- LOD switching UI
-- Export LOD files
+- Binary data streaming for performance
+- LOD level support
+- Real-time file loading
 
-### Phase 4: Polish & Optimization (Coming Soon)
+### Current Features
 
-- Performance stats overlay
-- Better rendering quality
-- UI improvements
+- View Gaussian Splat PLY files in browser
+- Pan, zoom, and orbit controls
+- Binary streaming for large files
+- Real-time file watching with WebSocket updates
 
 ## Installation
 
@@ -166,11 +167,10 @@ curl http://localhost:8000/api/load/packed-tree_full.ply | jq '.vertex_count'
 curl http://localhost:8000/
 ```
 
-## Next Steps
+## Known Issues
 
-1. **Phase 2**: Implement Three.js renderer and basic UI
-2. **Phase 3**: Add LOD generation endpoint and switching UI
-3. **Phase 4**: Performance optimization and polish
+- Large files (>1M gaussians) may cause browser memory issues
+- See `docs/TROUBLESHOOTING.md` for viewer-specific issues
 
 ## Troubleshooting
 

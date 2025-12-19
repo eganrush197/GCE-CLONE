@@ -39,7 +39,7 @@ python cli.py packed-tree.blend ./output --packed --uv-layer uv0
 python cli.py model.obj ./output --lod 1000 5000 25000
 ```
 
-**See [USER_GUIDE.md](USER_GUIDE.md) for complete documentation.**
+**See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for complete documentation.**
 
 ## Features
 
@@ -113,17 +113,23 @@ pip install torch torchvision
 ### Command Line
 
 ```bash
-# Basic conversion
-python mesh2gaussian input.obj output.ply
+# Basic conversion (OBJ/GLB files)
+python cli.py model.obj ./output
 
-# With LOD generation
-python mesh2gaussian input.glb output.ply --lod 5000,25000,100000
+# Blender file with procedural shaders (requires Blender installation)
+python cli.py model.blend ./output --blender "path/to/blender.exe"
+
+# Blender file with packed textures (recommended for pre-textured .blend files)
+python -m src.pipeline.orchestrator model.blend --output ./output --packed
+
+# With custom LOD levels
+python cli.py model.obj ./output --lod 5000 25000 100000
 
 # Specify initialization strategy
-python mesh2gaussian input.obj output.ply --strategy hybrid
+python cli.py model.obj ./output --strategy hybrid
 
-# With GPU optimization
-python mesh2gaussian input.obj output.ply --optimize --device cuda
+# Keep temporary files for debugging
+python -m src.pipeline.orchestrator model.blend --output ./output --packed --keep-temp
 ```
 
 ### Python API
@@ -221,43 +227,40 @@ Choose the right pruning strategy for your use case:
 ## Project Structure
 
 ```
-GCE CLONE/
+project-root/
 ├── src/
-│   ├── mesh_to_gaussian.py      # Core converter (630 lines, includes UV sampling)
-│   ├── gaussian_splat.py        # Advanced batch operations (108 lines)
-│   ├── lod_generator.py         # LOD generation (199 lines)
-│   └── __init__.py              # Package exports
-├── tests/
-│   ├── test_converter.py        # Core test suite (8 tests)
-│   └── test_texture_sampling.py # Texture sampling tests (2 tests)
-├── examples/
-│   └── basic_usage.py           # Usage examples
-├── convert.py                   # Simple wrapper script
-├── mesh2gaussian                # Full-featured CLI tool
-├── requirements.txt             # Dependencies
-└── README.md                    # This file
+│   ├── mesh_to_gaussian.py        # Core converter with UV sampling
+│   ├── gaussian_splat.py          # GaussianSplat data structure
+│   ├── lod_generator.py           # LOD generation strategies
+│   ├── pipeline/                  # Unified pipeline orchestrator
+│   │   ├── orchestrator.py        # Main pipeline coordinator
+│   │   ├── config.py              # Configuration dataclass
+│   │   └── router.py              # File routing logic
+│   └── stage1_baker/              # Blender integration
+│       ├── baker.py               # Python wrapper for Blender
+│       ├── packed_extractor.py    # Packed texture extraction
+│       └── blender_scripts/       # Blender Python scripts
+├── viewer/                        # Web-based Gaussian Splat viewer
+│   ├── server.py                  # FastAPI backend
+│   ├── backend/                   # API and PLY parsing
+│   └── static/                    # Three.js frontend
+├── tests/                         # Comprehensive test suite
+├── tools/                         # Utility scripts (ply_inspector, etc.)
+├── docs/                          # Documentation
+├── cli.py                         # Command-line interface
+├── requirements.txt               # Dependencies
+└── README.md                      # This file
 ```
-
-**Note:** `gaussian_splat.py` provides a collection-based `GaussianSplat` class for advanced
-batch operations. The default conversion pipeline uses `List[_SingleGaussian]` for flexibility.
-See the class documentation for conversion examples between formats.
 
 ## Documentation
 
-### User Documentation
-- **[USER_GUIDE.md](USER_GUIDE.md)** - Complete user guide with examples
-- **[PACKED_TEXTURE_PIPELINE.md](PACKED_TEXTURE_PIPELINE.md)** - Packed texture pipeline guide (NEW!)
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** - Complete user guide with examples
+- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Diagnostic and troubleshooting guide
+- **[PACKED_TEXTURE_PIPELINE.md](PACKED_TEXTURE_PIPELINE.md)** - Packed texture pipeline technical reference
 
-### Technical Documentation
-See `project context/` for detailed technical documentation:
-- `PROJECT_DOCUMENTATION.md` - Complete technical reference
-- `CURRENT_PROJECT_STATE.md` - Current status snapshot
-- `COLOR & TEXTURE SUPPORT.md` - Color implementation details
-- `Unified Gaussian Pipeline - Implementation Spec/` - Phase-by-phase implementation details
-
-### Quick Start
-- `QUICKSTART.md` - 5-minute quick start guide
-- `examples/basic_usage.py` - Working code examples
+### Technical Documentation (for developers)
+- **[project context/Gaussian_Splat_Viewer_Technical_Specification.md](project%20context/Gaussian_Splat_Viewer_Technical_Specification.md)** - Full architecture and API reference
+- **[project context/Color-System-Technical-Documentation.md](project%20context/Color-System-Technical-Documentation.md)** - Color encoding system details
 
 ## Development
 

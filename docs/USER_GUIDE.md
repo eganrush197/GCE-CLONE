@@ -1,7 +1,7 @@
 # Unified Gaussian Pipeline - User Guide
 
-**Version:** 1.0  
-**Last Updated:** December 1, 2025
+**Version:** 1.1
+**Last Updated:** December 19, 2025
 
 ---
 
@@ -504,6 +504,7 @@ python cli.py model.blend ./output --texture-resolution 512 --lod 100 500
 1. **Missing textures** - Check MTL file references
 2. **Wrong UV mapping** - Verify UVs in original model
 3. **Gamma correction** - Textures may need sRGB conversion
+4. **Viewer rendering** - Some viewers may have color space issues
 
 **Debug:**
 ```bash
@@ -511,7 +512,16 @@ python cli.py model.blend ./output --texture-resolution 512 --lod 100 500
 python cli.py model.blend ./output --keep-temp
 
 # Check temp/baked_texture.png visually
+
+# Verify PLY color data with inspector tool
+python tools/ply_inspector.py output/model_full.ply
 ```
+
+**Color System Status (December 2025):**
+The color encoding system has been updated with an R/G channel swap fix in `mesh_to_gaussian.py` (line 413-416). The PLY files contain correctly sampled colors in the Spherical Harmonics format. If colors appear incorrect in the viewer, verify:
+- The PLY file contains expected colors (use ply_inspector.py)
+- The viewer correctly interprets SH DC coefficients (f_dc_0, f_dc_1, f_dc_2)
+- See `project context/Color-System-Technical-Documentation.md` for full technical details.
 
 ---
 

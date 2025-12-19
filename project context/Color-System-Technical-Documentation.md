@@ -246,78 +246,46 @@ Re-run conversion and check that:
 
 ---
 
-## 6. Next Steps
+## 6. Applied Fix & Verification
 
-### 6.1 Diagnose Channel Swap Issue
+### 6.1 Fix Applied (December 18, 2025)
 
-**Step 1: Check Extracted Textures**
+The R/G channel swap was applied during texture loading in `mesh_to_gaussian.py` at lines 413-416:
 
-Run the texture channel diagnostic tool on the extracted textures:
+```python
+# FIX: Swap Red and Green channels (Blender exports with swapped channels)
+# This fixes the issue where leaves appear brown and bark appears green
+if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
+    img_array = img_array[:, :, [1, 0, 2]]  # Swap R and G channels (G, R, B)
+```
 
+This converts Blender's exported texture channel order to standard RGB for correct color display.
+
+### 6.2 Verification Steps
+
+After re-running conversion:
+
+1. **Run the conversion:**
 ```bash
-# Find the temp directory (or re-run extraction to create it)
-python -m src.pipeline.orchestrator packed-tree.blend --output output_test --keep-temp
-
-# Check the texture channels
-python tools/check_texture_channels.py temp_packed-tree/textures
+python -m src.pipeline.orchestrator packed-tree.blend --output output_test --packed
 ```
 
-This will show:
-- Which channel is dominant (R, G, or B)
-- Whether textures are stored as RGB or BGR
-- Color statistics for each channel
-
-**Step 2: Identify the Swap Location**
-
-Possible locations:
-1. **Blender extraction** (`extract_packed.py` line 268): `img.file_format = 'PNG'`
-2. **PIL loading** (`mesh_to_gaussian.py` line 403): `np.array(image, dtype=np.float32)`
-3. **PLY writing** (`mesh_to_gaussian.py` line 2100): `struct.pack('<fff', *sh_dc[i])`
-
-**Step 3: Fix the Channel Order**
-
-Once identified, apply one of these fixes:
-
-**Option A: Swap during texture loading (mesh_to_gaussian.py)**
-```python
-# After line 403
-img_array = np.array(image, dtype=np.float32) / 255.0
-# Add BGR to RGB conversion
-if img_array.shape[2] >= 3:
-    img_array = img_array[:, :, [2, 1, 0]]  # Swap R and B channels
-```
-
-**Option B: Swap during PLY writing (mesh_to_gaussian.py)**
-```python
-# Line 2100 - swap R and B channels
-f.write(struct.pack('<fff', sh_dc[i][2], sh_dc[i][1], sh_dc[i][0]))
-```
-
-**Option C: Fix Blender extraction (extract_packed.py)**
-```python
-# After line 268, ensure RGB color space
-img.colorspace_settings.name = 'sRGB'
-```
-
-### 6.2 Verify the Fix
-
-After applying the fix:
-
-1. Re-run the conversion:
-```bash
-python -m src.pipeline.orchestrator packed-tree.blend --output output_test
-```
-
-2. Inspect the new PLY file:
+2. **Inspect the PLY file:**
 ```bash
 python tools/ply_inspector.py output_test/packed-tree_full.ply 20
 ```
 
-3. Load in viewer and verify:
-   - Leaves should be GREEN
-   - Bark should be BROWN
+3. **Expected Results:**
+   - Leaves should be GREEN (positive G channel, negative R channel in SH DC)
+   - Bark should be BROWN (positive R channel, lower G channel in SH DC)
+   - Colors should match the original Blender model
 
-### 6.3 Additional Diagnostics
+### 6.3 Diagnostic Tools
+
+**PLY Inspector:**
+```bash
+python tools/ply_inspector.py output_clouds/packed-tree_full.ply 20
+```
 
 **Browser Console Logging:**
 The viewer logs SH DC statistics when loading:
