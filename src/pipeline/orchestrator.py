@@ -11,7 +11,7 @@ import time
 
 from .config import PipelineConfig
 from .router import FileRouter
-from utils.logging_utils import Timer, TimingStats
+from src.utils.logging_utils import Timer, TimingStats
 
 
 class Pipeline:
