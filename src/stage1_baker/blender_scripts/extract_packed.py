@@ -210,23 +210,21 @@ def extract_packed_textures(output_path):
             print(f"  [WARN] Skipping {img.name} - no data")
             continue
 
-        # Determine output filename
-        # Use original filename if available, otherwise use image name
-        if img.filepath:
-            original_name = Path(img.filepath).name
-        else:
-            # Generate filename from image name
-            original_name = img.name
-            if not original_name.endswith(('.png', '.jpg', '.jpeg', '.tga', '.exr')):
-                original_name += '.png'
+        # Determine output filename - prefer image name for reliability
+        original_name = img.name if img.name else Path(img.filepath).name
 
-        # Clean up Blender's duplicate suffixes (.001, .002, etc.)
+        # Step 1: Remove Blender's duplicate suffix if present (.001, .002, etc.)
+        # These appear AFTER the extension: "texture.png.001"
         base_name = original_name
         if '.' in original_name:
-            parts = original_name.rsplit('.', 2)
-            if len(parts) >= 2 and parts[-2].isdigit() and len(parts[-2]) == 3:
-                # Remove the .001 suffix
-                base_name = parts[0] + '.' + parts[-1]
+            name_without_suffix, potential_suffix = original_name.rsplit('.', 1)
+            if potential_suffix.isdigit() and len(potential_suffix) == 3:
+                base_name = name_without_suffix
+
+        # Step 2: Ensure we have a valid image extension
+        valid_extensions = ('.png', '.jpg', '.jpeg', '.tga', '.exr', '.bmp', '.tiff')
+        if not base_name.lower().endswith(valid_extensions):
+            base_name += '.png'
 
         output_file = textures_dir / base_name
 
@@ -567,29 +565,33 @@ def export_mesh_with_materials(output_path, uv_layer):
             print("  [WARN] No UV layers found!")
             actual_uv_layer = None
 
-    # Build face-to-material mapping from triangulated mesh
-    # This ensures the mapping matches the triangulated OBJ export
+    # Triangulate the mesh ONCE before export
+    # This ensures face materials mapping matches the exported OBJ exactly
+    # (Previously we triangulated separately for mapping and export, causing mismatches)
     import bmesh
 
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
 
-    # Create a temporary mesh to get triangulated face materials
-    temp_mesh = bpy.data.meshes.new("temp_triangulated_materials")
-    bm.to_mesh(temp_mesh)
+    # Apply the triangulated bmesh back to the actual mesh
+    # This modifies the joined mesh (not the original source meshes)
+    bm.to_mesh(mesh)
     bm.free()
 
+    # Update mesh to reflect changes
+    mesh.update()
+
+    print(f"  [INFO] Triangulated mesh: {len(mesh.polygons)} faces")
+
+    # Build face-to-material mapping from the now-triangulated mesh
     face_materials = []
-    for poly in temp_mesh.polygons:
+    for poly in mesh.polygons:
         mat_idx = poly.material_index
         if mat_idx < len(active_obj.data.materials) and active_obj.data.materials[mat_idx]:
             face_materials.append(active_obj.data.materials[mat_idx].name)
         else:
             face_materials.append(None)
-
-    # Clean up temporary mesh
-    bpy.data.meshes.remove(temp_mesh)
 
     print(f"  [INFO] Built face materials mapping for {len(face_materials)} triangulated faces")
 
@@ -605,24 +607,26 @@ def export_mesh_with_materials(output_path, uv_layer):
 
     if use_new_exporter:
         # Blender 3.2+ (new exporter)
+        # Note: export_triangulated_mesh=False because mesh is already triangulated above
         bpy.ops.wm.obj_export(
             filepath=str(obj_path),
             export_selected_objects=True,
             export_uv=True,
             export_normals=True,
             export_materials=True,
-            export_triangulated_mesh=True,
+            export_triangulated_mesh=False,
             path_mode='RELATIVE'
         )
     else:
         # Blender 3.1 and older (legacy exporter)
+        # Note: use_triangles=False because mesh is already triangulated above
         bpy.ops.export_scene.obj(
             filepath=str(obj_path),
             use_selection=True,
             use_uvs=True,
             use_normals=True,
             use_materials=True,
-            use_triangles=True,
+            use_triangles=False,
             path_mode='RELATIVE'
         )
 

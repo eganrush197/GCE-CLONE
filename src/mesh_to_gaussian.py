@@ -151,6 +151,182 @@ class MeshToGaussianConverter:
         self.logger.debug("Loaded mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
         return mesh
 
+    def load_mesh_as_scene(self, path: str) -> dict:
+        """
+        Load OBJ as a Scene, returning separate meshes per material.
+
+        This avoids face-reordering issues by keeping materials separate.
+        Each geometry in the scene corresponds to one material, with the
+        geometry name being the material name.
+
+        Args:
+            path: Path to OBJ file
+
+        Returns:
+            Dict of {material_name: trimesh.Trimesh} with normalized vertices
+
+        Raises:
+            ValueError: If mesh is invalid or loading fails
+        """
+        self.logger.debug("Loading OBJ as Scene: %s", path)
+
+        # Load as Scene (not forced to mesh)
+        scene = trimesh.load(path)
+
+        if not hasattr(scene, 'geometry') or len(scene.geometry) == 0:
+            raise ValueError(f"Failed to load OBJ as Scene with materials: {path}")
+
+        self.logger.debug("Loaded Scene with %d geometries", len(scene.geometry))
+
+        # Compute global center and scale from all vertices
+        all_vertices = []
+        for geom in scene.geometry.values():
+            if hasattr(geom, 'vertices'):
+                all_vertices.append(geom.vertices)
+
+        if not all_vertices:
+            raise ValueError("No geometry with vertices found in Scene")
+
+        combined_vertices = np.vstack(all_vertices)
+        center = combined_vertices.mean(axis=0)
+        max_extent = np.abs(combined_vertices - center).max()
+
+        if max_extent < 1e-8:
+            raise ValueError("Cannot normalize mesh: all vertices are at the same point")
+
+        # Normalize each geometry with the same center/scale
+        material_meshes = {}
+        total_faces = 0
+
+        for name, geom in scene.geometry.items():
+            if not hasattr(geom, 'vertices') or not hasattr(geom, 'faces'):
+                self.logger.warning("Skipping geometry '%s': no vertices/faces", name)
+                continue
+
+            # Apply global normalization
+            geom.vertices = (geom.vertices - center) / max_extent
+
+            material_meshes[name] = geom
+            total_faces += len(geom.faces)
+            self.logger.debug("  %s: %d faces, %d vertices, UV: %s",
+                            name, len(geom.faces), len(geom.vertices),
+                            hasattr(geom.visual, 'uv') and geom.visual.uv is not None)
+
+        self.logger.info("Loaded %d material meshes with %d total faces",
+                        len(material_meshes), total_faces)
+
+        return material_meshes
+
+    def _build_face_material_mapping_from_obj(self, obj_path: str, mesh: trimesh.Trimesh) -> list:
+        """
+        Build face-to-material mapping that matches trimesh's face order.
+
+        Trimesh reorders faces AND duplicates vertices when loading OBJ files,
+        so vertex indices don't match. We use vertex POSITIONS to match faces:
+        1. Parse the OBJ file to get vertices and faces with materials
+        2. Apply the same center/scale transformation that load_mesh() applies
+        3. Build a hash of each face using sorted, rounded vertex positions
+        4. Match trimesh faces to OBJ faces by their position hashes
+
+        Args:
+            obj_path: Path to the OBJ file
+            mesh: The trimesh mesh (already loaded, centered, and scaled)
+
+        Returns:
+            List of material names, one per face, in trimesh's face order
+        """
+        # Step 1: Parse OBJ to get vertices and faces with materials
+        obj_vertices = []
+        obj_faces = []  # List of (vertex_indices, material_name)
+        current_material = None
+
+        with open(obj_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+
+                if parts[0] == 'v':
+                    # Vertex position
+                    x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+                    obj_vertices.append(np.array([x, y, z]))
+
+                elif parts[0] == 'usemtl':
+                    current_material = parts[1]
+
+                elif parts[0] == 'f':
+                    # Parse face vertex indices (OBJ uses 1-based, format: v/vt/vn)
+                    vertex_indices = []
+                    for part in parts[1:]:
+                        v_idx = int(part.split('/')[0]) - 1  # Convert to 0-based
+                        vertex_indices.append(v_idx)
+                    obj_faces.append((vertex_indices, current_material))
+
+        self.logger.debug("Parsed %d vertices and %d faces from OBJ", len(obj_vertices), len(obj_faces))
+
+        # Step 2: Apply same transformation as load_mesh() to OBJ vertices
+        obj_vertices = np.array(obj_vertices)
+        obj_center = obj_vertices.mean(axis=0)
+        obj_vertices_centered = obj_vertices - obj_center
+        obj_scale = np.abs(obj_vertices_centered).max()
+        if obj_scale > 1e-8:
+            obj_vertices_normalized = obj_vertices_centered / obj_scale
+        else:
+            obj_vertices_normalized = obj_vertices_centered
+
+        # Step 3: Build face position hash -> material mapping
+        # Precision for rounding vertex positions (avoids floating point issues)
+        PRECISION = 5
+        face_position_to_material = {}
+
+        for vertex_indices, material in obj_faces:
+            face_positions = []
+            for v_idx in vertex_indices:
+                pos = obj_vertices_normalized[v_idx]
+                rounded_pos = (round(float(pos[0]), PRECISION),
+                              round(float(pos[1]), PRECISION),
+                              round(float(pos[2]), PRECISION))
+                face_positions.append(rounded_pos)
+
+            # Sort positions to create order-independent key
+            face_key = tuple(sorted(face_positions))
+            face_position_to_material[face_key] = material
+
+        self.logger.debug("Built %d position-based face keys", len(face_position_to_material))
+
+        # Step 4: Build face_materials in trimesh's face order using position matching
+        face_materials = []
+        unmatched_count = 0
+        default_material = next(iter(face_position_to_material.values()), None) if face_position_to_material else None
+
+        for face_idx, face in enumerate(mesh.faces):
+            # Get vertex positions from trimesh mesh (already centered/scaled)
+            face_positions = []
+            for v_idx in face:
+                pos = mesh.vertices[v_idx]
+                rounded_pos = (round(float(pos[0]), PRECISION),
+                              round(float(pos[1]), PRECISION),
+                              round(float(pos[2]), PRECISION))
+                face_positions.append(rounded_pos)
+
+            # Sort to create order-independent key
+            face_key = tuple(sorted(face_positions))
+            material = face_position_to_material.get(face_key)
+
+            if material is None:
+                unmatched_count += 1
+                material = default_material
+
+            face_materials.append(material)
+
+        if unmatched_count > 0:
+            self.logger.warning("Could not match %d/%d faces to materials from OBJ (using position matching)",
+                              unmatched_count, len(mesh.faces))
+        else:
+            self.logger.info("Successfully mapped all %d faces to materials from OBJ", len(face_materials))
+
+        return face_materials
+
     def _load_obj_with_mtl(self, obj_path: str) -> trimesh.Trimesh:
         """Special OBJ loader that preserves MTL material colors AND textures"""
         from pathlib import Path
@@ -1362,7 +1538,18 @@ class MeshToGaussianConverter:
 
         # Load all material textures
         material_textures = self._load_material_textures(manifest, use_mipmaps=self.use_mipmaps)
-        face_materials = manifest.get('face_materials', [])
+
+        # CRITICAL FIX: Build face_materials from OBJ file to match trimesh's face order
+        # Trimesh reorders faces when loading, so manifest's face_materials (in OBJ order)
+        # doesn't match mesh.faces order. We rebuild the mapping using vertex indices.
+        obj_path = manifest.get('obj_file')
+        if obj_path:
+            face_materials = self._build_face_material_mapping_from_obj(obj_path, mesh)
+            self.logger.info("Built face-material mapping from OBJ (%d faces)", len(face_materials))
+        else:
+            # Fallback to manifest (may have ordering issues if trimesh reordered)
+            face_materials = manifest.get('face_materials', [])
+            self.logger.warning("No obj_file in manifest, using manifest's face_materials (may have ordering issues)")
 
         self.logger.info("Loaded textures for %d materials", len(material_textures))
 
@@ -1696,6 +1883,189 @@ class MeshToGaussianConverter:
         finally:
             self.clear_texture_cache()
 
+    def _mesh_to_gaussians_from_scene(self,
+                                       material_meshes: dict,
+                                       strategy: str,
+                                       samples_per_face: int,
+                                       manifest: dict) -> List[_SingleGaussian]:
+        """
+        Convert scene-based material meshes to gaussians.
+
+        This method processes each sub-mesh (one per material) separately,
+        avoiding face-reordering issues entirely since each sub-mesh IS one material.
+
+        Args:
+            material_meshes: Dict of {material_name: trimesh.Trimesh}
+            strategy: Gaussian placement strategy
+            samples_per_face: Number of samples per face
+            manifest: Material manifest from packed extraction
+
+        Returns:
+            List of gaussians with proper colors and properties
+        """
+        self.logger.info("Using scene-based multi-material processing")
+
+        # Load all material textures
+        material_textures = self._load_material_textures(manifest, use_mipmaps=self.use_mipmaps)
+        self.logger.info("Loaded textures for %d materials", len(material_textures))
+
+        gaussians = []
+
+        # Transparency culling threshold
+        OPACITY_THRESHOLD = 0.1
+
+        # Roughness scale modulation parameters
+        ROUGHNESS_SCALE_MIN = 1.0
+        ROUGHNESS_SCALE_MAX = 1.5
+
+        try:
+            # Map adaptive to hybrid
+            if strategy == 'adaptive':
+                strategy = 'hybrid'
+
+            # Process each material's mesh separately
+            for material_name, mesh in material_meshes.items():
+                self.logger.debug("Processing material: %s (%d faces)", material_name, len(mesh.faces))
+
+                # Get texture for this material
+                texture_data = material_textures.get(material_name)
+                if texture_data is None:
+                    self.logger.warning("No texture found for material '%s', skipping", material_name)
+                    continue
+
+                n_faces = len(mesh.faces)
+                if n_faces == 0:
+                    continue
+
+                n_samples = n_faces * samples_per_face
+
+                # Get face vertices
+                v0 = mesh.vertices[mesh.faces[:, 0]]
+                v1 = mesh.vertices[mesh.faces[:, 1]]
+                v2 = mesh.vertices[mesh.faces[:, 2]]
+
+                # Compute face normals and areas
+                edge1 = v1 - v0
+                edge2 = v2 - v0
+                face_normals = np.cross(edge1, edge2)
+                face_areas = np.linalg.norm(face_normals, axis=1) * 0.5
+                face_normals = face_normals / (np.linalg.norm(face_normals, axis=1, keepdims=True) + 1e-8)
+
+                # Generate barycentric coordinates
+                r1 = np.random.random(n_samples)
+                r2 = np.random.random(n_samples)
+                sqrt_r1 = np.sqrt(r1)
+
+                w1 = 1 - sqrt_r1
+                w2 = sqrt_r1 * (1 - r2)
+                w3 = sqrt_r1 * r2
+
+                # Face indices for all samples
+                face_indices = np.repeat(np.arange(n_faces), samples_per_face)
+
+                # Compute positions
+                positions = (w1[:, None] * v0[face_indices] +
+                            w2[:, None] * v1[face_indices] +
+                            w3[:, None] * v2[face_indices])
+
+                # Compute normals
+                normals = face_normals[face_indices]
+
+                # Compute base scales
+                scales_base = np.sqrt(face_areas[face_indices]) * 0.3
+
+                # Get UVs from mesh
+                uvs = None
+                if hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None:
+                    vertex_uvs = mesh.visual.uv
+                    faces = mesh.faces[face_indices]
+                    uv0 = vertex_uvs[faces[:, 0]]
+                    uv1 = vertex_uvs[faces[:, 1]]
+                    uv2 = vertex_uvs[faces[:, 2]]
+
+                    uvs = (w1[:, None] * uv0 +
+                          w2[:, None] * uv1 +
+                          w3[:, None] * uv2)
+                else:
+                    self.logger.warning("No UVs for material '%s', using zeros", material_name)
+                    uvs = np.zeros((n_samples, 2))
+
+                # Sample colors, opacity, and roughness from texture
+                # texture_data is a dict with 'diffuse', 'transparency', 'roughness' keys
+
+                # Calculate mipmap levels based on scales
+                scales_3d = np.column_stack([scales_base, scales_base, scales_base * 0.3])
+                mipmap_levels = self._calculate_mipmap_level(scales_3d, (1024, 1024))
+
+                # Sample diffuse color
+                colors = np.full((n_samples, 3), 0.5, dtype=np.float32)
+                if 'diffuse' in texture_data:
+                    colors = self._sample_texture_bilinear(
+                        texture_data['diffuse'], uvs, num_channels=3, mipmap_levels=mipmap_levels
+                    )
+
+                # Sample transparency/opacity
+                opacities = np.ones(n_samples, dtype=np.float32)
+                if 'transparency' in texture_data:
+                    opacities = self._sample_texture_bilinear(
+                        texture_data['transparency'], uvs, num_channels=1, mipmap_levels=mipmap_levels
+                    )
+
+                # Sample roughness
+                roughness = np.full(n_samples, 0.5, dtype=np.float32)
+                if 'roughness' in texture_data:
+                    roughness = self._sample_texture_bilinear(
+                        texture_data['roughness'], uvs, num_channels=1, mipmap_levels=mipmap_levels
+                    )
+
+                # Apply roughness scale modulation
+                scale_multiplier = ROUGHNESS_SCALE_MIN + roughness * (ROUGHNESS_SCALE_MAX - ROUGHNESS_SCALE_MIN)
+                scales_base = scales_base * scale_multiplier
+
+                # Convert normals to quaternions
+                quaternions = self._normals_to_quaternions_vectorized(normals)
+
+                # Build scales array
+                scales = np.zeros((n_samples, 3))
+                scales[:, 0] = scales_base
+                scales[:, 1] = scales_base
+                scales[:, 2] = scales_base * 0.3
+
+                # Apply transparency culling
+                valid_mask = opacities >= OPACITY_THRESHOLD
+                n_culled = n_samples - np.sum(valid_mask)
+
+                if n_culled > 0:
+                    self.logger.debug("  Culled %d samples (%.1f%%) from %s due to low opacity",
+                                    n_culled, 100.0 * n_culled / n_samples, material_name)
+
+                # Filter to valid samples
+                positions = positions[valid_mask]
+                scales = scales[valid_mask]
+                quaternions = quaternions[valid_mask]
+                opacities = opacities[valid_mask]
+                colors = colors[valid_mask]
+
+                n_valid = len(positions)
+
+                # Create gaussians for this material
+                for i in range(n_valid):
+                    gaussians.append(_SingleGaussian(
+                        position=positions[i],
+                        scales=scales[i],
+                        rotation=quaternions[i],
+                        opacity=float(opacities[i]),
+                        sh_dc=colors[i] - 0.5
+                    ))
+
+                self.logger.debug("  Created %d gaussians for %s", n_valid, material_name)
+
+            self.logger.info("Created %d total gaussians from scene-based processing", len(gaussians))
+            return gaussians
+
+        finally:
+            self.clear_texture_cache()
+
     def mesh_to_gaussians(self, mesh: trimesh.Trimesh,
                          strategy: str = 'vertex',
                          samples_per_face: int = 1,
@@ -1833,6 +2203,36 @@ class MeshToGaussianConverter:
             # Clear texture cache after processing to prevent memory leaks
             # Cache will be rebuilt for next mesh if needed
             self.clear_texture_cache()
+
+    def convert_with_scene(self, obj_path: str,
+                           strategy: str = 'face',
+                           samples_per_face: int = 10,
+                           material_manifest: dict = None) -> List[_SingleGaussian]:
+        """
+        Convert OBJ to gaussians using scene-based loading.
+
+        This method loads the OBJ as a Scene (separate meshes per material),
+        avoiding face-reordering issues that occur when loading as a single mesh.
+
+        Args:
+            obj_path: Path to OBJ file
+            strategy: Gaussian placement strategy (face recommended for multi-material)
+            samples_per_face: Number of samples per face
+            material_manifest: Material manifest from packed extraction
+
+        Returns:
+            List of gaussians with proper colors and properties
+        """
+        if material_manifest is None:
+            raise ValueError("material_manifest is required for scene-based conversion")
+
+        # Load OBJ as Scene (separate meshes per material)
+        material_meshes = self.load_mesh_as_scene(obj_path)
+
+        # Convert using scene-based method
+        return self._mesh_to_gaussians_from_scene(
+            material_meshes, strategy, samples_per_face, material_manifest
+        )
 
     def _normal_to_quaternion(self, normal: np.ndarray) -> np.ndarray:
         """Convert normal vector to quaternion rotation"""

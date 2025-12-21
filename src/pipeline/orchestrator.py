@@ -202,18 +202,30 @@ class Pipeline:
         self.logger.info("-"*70)
 
         with Timer("Stage 2: Gaussian Conversion", self.logger) as timer:
-            # Load mesh
-            with Timer("Mesh loading", self.logger) as load_timer:
-                mesh = self.converter.load_mesh(str(obj_path))
+            # Use scene-based loading for multi-material (packed) mode
+            # This avoids face-reordering issues with trimesh
+            if manifest is not None:
+                self.logger.info("Using scene-based loading for multi-material mode")
+                with Timer("Scene loading + Gaussian generation", self.logger) as gen_timer:
+                    gaussians = self.converter.convert_with_scene(
+                        str(obj_path),
+                        strategy=self.config.strategy,
+                        samples_per_face=10,
+                        material_manifest=manifest
+                    )
+                load_timer = gen_timer  # For timing stats compatibility
+            else:
+                # Standard single-material path
+                with Timer("Mesh loading", self.logger) as load_timer:
+                    mesh = self.converter.load_mesh(str(obj_path))
 
-            # Convert to gaussians
-            with Timer("Gaussian generation", self.logger) as gen_timer:
-                gaussians = self.converter.mesh_to_gaussians(
-                    mesh,
-                    strategy=self.config.strategy,
-                    samples_per_face=10,
-                    material_manifest=manifest
-                )
+                with Timer("Gaussian generation", self.logger) as gen_timer:
+                    gaussians = self.converter.mesh_to_gaussians(
+                        mesh,
+                        strategy=self.config.strategy,
+                        samples_per_face=10,
+                        material_manifest=manifest
+                    )
 
         # Track timing
         stage2_stats = TimingStats("Stage 2: Gaussian Conversion", timer.elapsed)
